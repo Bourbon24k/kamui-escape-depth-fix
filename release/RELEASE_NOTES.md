@@ -1,4 +1,4 @@
-# KAMUI 2.4.1 — iOS 27.0.1–27.2 sandbox escape + MobileGestalt editor
+# KAMUI 2.4.2 — iOS 27.0.1–27.2 sandbox escape + MobileGestalt editor
 
 **Open source, MIT licensed and free for everyone.** There is no tester list,
 private group or allowlist. Anyone can use, modify and redistribute KAMUI and
@@ -6,10 +6,10 @@ the MobileGestalt editor.
 
 ## Assets
 
-- `KAMUI-2.4.1.ipa` — the app. Install it on any supported device.
+- `KAMUI-2.4.2.ipa` — the app. Install it on any supported device.
 - Source code and build instructions are in the repository.
 
-## What's new in 2.4.1
+## What's new in 2.4.2
 
 - **Languages**: English, Russian, Korean, Arabic, Turkish, Ukrainian and
   Vietnamese. Settings → Language switches the app language and offers System
@@ -20,6 +20,14 @@ the MobileGestalt editor.
   (`com.apple.PosterBoard.unprotectedUserDefaults.plist`) is written. This
   targets the gray-poster/dummy-wallpaper problem. Container-format packs keep
   their original descriptor UUIDs.
+- **Free-certificate bad_query file form**: class 13, MobileGestalt
+  SystemGroup, part 3, an 8-level `..` traversal to
+  `com.apple.MobileGestalt.plist`, flags `0x8000000000` (no include-path bit).
+  This is the form used by GestaltEdit on iOS 27 and the one that has worked
+  for some free Apple ID signatures.
+- **Class-2 `RENAME_SWAP` probe**: atomically swaps `Library/Caches` with a
+  symlink to the target, queries class 2, then swaps back. This may bypass the
+  plain-rename denial without moving Library or causing the 2.2 crash.
 - **Class-2 staged symlink probe**: a fake `Library/Caches` tree inside the
   app’s own Caches, resolved through a `partDomain` symlink. It is safe, needs
   no app group, and verifies the token against the target before reporting

