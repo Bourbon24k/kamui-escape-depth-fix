@@ -1,4 +1,4 @@
-# KAMUI 2.4.2 — iOS 27.0.1–27.2 sandbox escape + MobileGestalt editor
+# KAMUI 2.4.3 — iOS 27.0.1–27.2 sandbox escape + MobileGestalt editor
 
 **Open source, MIT licensed and free for everyone.** There is no tester list,
 private group or allowlist. Anyone can use, modify and redistribute KAMUI and
@@ -6,10 +6,10 @@ the MobileGestalt editor.
 
 ## Assets
 
-- `KAMUI-2.4.2.ipa` — the app. Install it on any supported device.
+- `KAMUI-2.4.3.ipa` — the app. Install it on any supported device.
 - Source code and build instructions are in the repository.
 
-## What's new in 2.4.2
+## What's new in 2.4.3
 
 - **Languages**: English, Russian, Korean, Arabic, Turkish, Ukrainian and
   Vietnamese. Settings → Language switches the app language and offers System
@@ -20,6 +20,10 @@ the MobileGestalt editor.
   (`com.apple.PosterBoard.unprotectedUserDefaults.plist`) is written. This
   targets the gray-poster/dummy-wallpaper problem. Container-format packs keep
   their original descriptor UUIDs.
+- **Class-12 geod built-in container**: direct part-3 token for
+  `com.apple.geod` (flags `0x8000000000`, `0x0800000000`, `0x8100000000`), then
+  a symlinked `Library/Caches` to the target. This is the free-certificate
+  route that does not require an app group or a restricted bundle ID.
 - **Free-certificate bad_query file form**: class 13, MobileGestalt
   SystemGroup, part 3, an 8-level `..` traversal to
   `com.apple.MobileGestalt.plist`, flags `0x8000000000` (no include-path bit).

@@ -24,7 +24,7 @@ build — the MIT license allows all of it.
 The MobileGestalt editor itself has no access check and no allowlist. On
 **iOS 27.2** the primary class-7 path needs at least one
 `com.apple.security.application-groups` entitlement in the running app. KAMUI
-2.4.2 also offers an **opt-in class-2 parent fallback** (Settings → Class-2
+2.4.3 also offers an **opt-in class-2 parent fallback** (Settings → Class-2
 fallback), which renames the app's own `Library` and may work without an app
 group. It is off by default because some builds terminate the app when
 `Library` is moved. If both paths fail, the log shows exactly which step the
@@ -128,7 +128,7 @@ tmp                  -> EPERM (errno 1)
 SystemData           -> EPERM (errno 1)
 ```
 
-Only the app-group part directory is directly renameable. KAMUI 2.4.2 has an
+Only the app-group part directory is directly renameable. KAMUI 2.4.3 has an
 **opt-in class-2 parent fallback** for builds without an app group. It is off
 by default (2.2 ran it automatically and could crash on builds that kill the
 process for moving `Library`):
@@ -168,10 +168,13 @@ hardcoded identifier.
 | # | Strategy | Needs app group | Likely versions |
 |---|---|---|---|
 | 1 | class 13 + 8-level traversal to the MG plist file (`bad_query` file form) | no | 27.x where bad_query is open |
-| 2 | class 7 part-directory symlink | yes | 27.2 |
-| 3 | class 2 parent `Library` symlink (2.4.2, opt-in) | no | 27.2 if `Library` rename is allowed |
-| 4 | class 13 direct MG query | no | builds that issue a token |
-| 5 | class 12 geod + traversal | no | older builds |
+| 2 | class 13 + traversal to the target directory | no | 27.x where traversal is open |
+| 3 | **class 12 `com.apple.geod` direct + symlinked Caches** | no | 27.2 if geod is still built-in allowed |
+| 4 | class 7 part-directory symlink | yes | 27.2 |
+| 5 | class 2 `RENAME_SWAP` / stage / subpath | no | 27.2 if allowed |
+| 6 | class 2 parent `Library` symlink | no | opt-in, can terminate app |
+| 7 | class 13 direct MG query | no | builds that issue a token |
+| 8 | class 12 geod + traversal | no | older builds |
 
 The first successful strategy is used. A result but no token is logged as
 `token=NO consume=-5` (`-5` is the app's "no token / consume failed", not an
@@ -206,7 +209,7 @@ Requirements: Linux/macOS, clang, an iOS SDK (Theos SDK works), zlib.
 
 ```bash
 ./build.sh
-# -> build/KAMUI-2.4.2.ipa
+# -> build/KAMUI-2.4.3.ipa
 ```
 
 The default bundle identifier is `com.kamui.escape`. Override with `BID=...`.
@@ -216,7 +219,7 @@ The SDK path can be overridden with `SDK=...`.
 
 ## 5. Install and runtime requirement
 
-Anyone can install `KAMUI-2.4.2.ipa`; use whatever installation method you
+Anyone can install `KAMUI-2.4.3.ipa`; use whatever installation method you
 normally use.
 
 The primary 27.2 strategy needs the running app to have at least one
@@ -271,6 +274,9 @@ escape: using class7 symlink
 
 ## 8. Version notes
 
+- **2.4.3** — adds the class-12 `com.apple.geod` built-in container path:
+  direct token + symlinked `Library/Caches`, which may work on a free
+  certificate without an app group. Also includes all previous probes.
 - **2.4.2** — adds the free-certificate `bad_query` file form (class 13,
   MobileGestalt SystemGroup, 8-level traversal, flags `0x8000000000`, direct
   `com.apple.MobileGestalt.plist` target), plus `RENAME_SWAP` and class-2
@@ -377,9 +383,9 @@ use, copy, modify, merge, publish, distribute, sublicense and sell copies of
 the software, including the MobileGestalt editor, as long as the copyright and
 permission notice are preserved.
 
-`v2.4.2`:
+`v2.4.3`:
 
-- `KAMUI-2.4.2.ipa` — the app; install it on any supported device.
+- `KAMUI-2.4.3.ipa` — the app; install it on any supported device.
 - Source code and build script are in this repository.
 
 There is no allowlist and no special access. The anime name is for fun; the
