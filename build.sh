@@ -16,9 +16,14 @@ rm -rf "$BUILD"
 mkdir -p "$APP"
 
 echo "[*] compiling..."
+LINKER_FLAGS=()
+if [ "$(uname -s)" = "Linux" ]; then
+    LINKER_FLAGS=(-fuse-ld=lld)
+fi
 clang \
     -target arm64-apple-ios14.0 \
     -isysroot "$SDK" \
+    "${LINKER_FLAGS[@]}" \
     -fobjc-arc -fblocks -O2 \
     -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
     -framework UIKit \

@@ -146,6 +146,8 @@ static NSString *BQValueSummary(id v) {
 @property (nonatomic, copy) NSString *originalSiriRegion;
 @property (nonatomic, copy) NSString *originalSiriRegionCode;
 @property (nonatomic, assign) BOOL loading;
+@property (nonatomic, assign) BOOL hasPendingChanges;
+@property (nonatomic, assign) BOOL originalBackupAvailable;
 @end
 
 @implementation GestaltVC
@@ -199,6 +201,19 @@ static NSString *BQValueSummary(id v) {
 
 - (void)loadGestalt {
     if (self.loading) { [self.refreshControl endRefreshing]; return; }
+    if (self.hasPendingChanges) {
+        [self.refreshControl endRefreshing];
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Discard unapplied changes?", nil)
+                                                                   message:NSLocalizedString(@"Reloading MobileGestalt will discard your pending edits.", nil)
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+        [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Reload", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
+            self.hasPendingChanges = NO;
+            [self loadGestalt];
+        }]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
     self.loading = YES;
     BQBusyView *busy = [BQBusyView showInView:self.view text:NSLocalizedString(@"Reading MobileGestalt...", nil)];
     dispatch_async(BQWorkQueue(), ^{
@@ -238,9 +253,17 @@ static NSString *BQValueSummary(id v) {
             self.cacheExtra = ce;
             self.keys = [ce.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
             NSDictionary *bak = [NSDictionary dictionaryWithContentsOfFile:BQBackupPath()];
+            self.originalBackupAvailable = NO;
             NSDictionary *bakCE = [bak[@"CacheExtra"] isKindOfClass:[NSDictionary class]] ? bak[@"CacheExtra"] : @{};
-            NSDictionary *art = bakCE[kArtKey];
-            self.originalSubtype = [art[@"ArtworkDeviceSubType"] integerValue];
+            id backupArtValue = bakCE[kArtKey];
+            NSDictionary *art = [backupArtValue isKindOfClass:[NSDictionary class]] ? backupArtValue : nil;
+            id backupSubtype = art[@"ArtworkDeviceSubType"];
+            self.originalBackupAvailable = [backupSubtype isKindOfClass:[NSNumber class]];
+            id liveArtValue = ce[kArtKey];
+            NSDictionary *liveArt = [liveArtValue isKindOfClass:[NSDictionary class]] ? liveArtValue : nil;
+            id liveSubtype = liveArt[@"ArtworkDeviceSubType"];
+            self.originalSubtype = [backupSubtype isKindOfClass:[NSNumber class]] ? [backupSubtype integerValue] :
+                ([liveSubtype isKindOfClass:[NSNumber class]] ? [liveSubtype integerValue] : 0);
             self.originalCacheData = bak[@"CacheData"] ?: mg[@"CacheData"];
             self.originalProductType = bakCE[kProductTypeKey] ?: ce[kProductTypeKey];
             self.originalHardware = bakCE[kHardwareKey] ?: ce[kHardwareKey];
@@ -248,6 +271,7 @@ static NSString *BQValueSummary(id v) {
             self.originalRegulatory = bakCE[kRegulatoryKey] ?: ce[kRegulatoryKey];
             self.originalSiriRegion = bakCE[kSiriRegionKey] ?: ce[kSiriRegionKey];
             self.originalSiriRegionCode = bakCE[kSiriRegionCodeKey] ?: ce[kSiriRegionCodeKey];
+            self.hasPendingChanges = NO;
             [self.tableView reloadData];
         });
     });
@@ -275,7 +299,14 @@ static NSString *BQValueSummary(id v) {
     } else {
         for (NSString *k in p[@"keys"]) [self.cacheExtra removeObjectForKey:k];
     }
+    self.hasPendingChanges = YES;
+    [self synchronizeCacheExtra];
     BQLog(@"preset %@ -> %d (in memory)", p[@"title"], sw.isOn);
+}
+
+- (void)synchronizeCacheExtra {
+    self.keys = [self.cacheExtra.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    [self.tableView reloadData];
 }
 
 #pragma mark - Dynamic Island
@@ -303,8 +334,10 @@ static NSString *BQValueSummary(id v) {
 }
 
 - (NSString *)currentSubtypeName {
-    NSDictionary *art = self.cacheExtra[kArtKey];
-    NSInteger v = [art[@"ArtworkDeviceSubType"] integerValue];
+    id artValue = self.cacheExtra[kArtKey];
+    NSDictionary *art = [artValue isKindOfClass:[NSDictionary class]] ? artValue : nil;
+    id subtype = art[@"ArtworkDeviceSubType"];
+    NSInteger v = [subtype isKindOfClass:[NSNumber class]] ? [subtype integerValue] : 0;
     if (v == 0) v = self.originalSubtype;
     return [self subtypeNameForValue:v];
 }
@@ -321,19 +354,19 @@ static NSString *BQValueSummary(id v) {
         [self.cacheExtra removeObjectForKey:kIslandKey];
     }
     BQLog(@"dynamic island -> %d", sw.isOn);
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2]
-                 withRowAnimation:UITableViewRowAnimationAutomatic];
+    self.hasPendingChanges = YES;
+    [self synchronizeCacheExtra];
 }
 
 - (void)resetDynamicIsland {
     [self.cacheExtra removeObjectForKey:kIslandKey];
     NSMutableDictionary *art = [self artwork];
     if (self.originalSubtype > 0) art[@"ArtworkDeviceSubType"] = @(self.originalSubtype);
-    else [art removeObjectForKey:@"ArtworkDeviceSubType"];
+    else if (self.originalBackupAvailable) [art removeObjectForKey:@"ArtworkDeviceSubType"];
     if (art.count) self.cacheExtra[kArtKey] = art;
     else [self.cacheExtra removeObjectForKey:kArtKey];
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2]
-                 withRowAnimation:UITableViewRowAnimationAutomatic];
+    self.hasPendingChanges = YES;
+    [self synchronizeCacheExtra];
 }
 
 - (void)setSubtype:(NSInteger)v {
@@ -348,8 +381,8 @@ static NSString *BQValueSummary(id v) {
     if (art.count) self.cacheExtra[kArtKey] = art;
     else [self.cacheExtra removeObjectForKey:kArtKey];
     BQLog(@"subtype -> %ld", (long)v);
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2]
-                 withRowAnimation:UITableViewRowAnimationAutomatic];
+    self.hasPendingChanges = YES;
+    [self synchronizeCacheExtra];
 }
 
 - (void)chooseSubtype {
@@ -403,15 +436,19 @@ static NSString *BQValueSummary(id v) {
 #pragma mark - Advanced
 
 - (NSString *)versionSummary {
-    NSString *v = self.cacheExtra[kVersionKey];
-    NSString *b = self.cacheExtra[kBuildKey];
+    id rawVersion = self.cacheExtra[kVersionKey];
+    id rawBuild = self.cacheExtra[kBuildKey];
+    NSString *v = [rawVersion isKindOfClass:[NSString class]] ? rawVersion : @"";
+    NSString *b = [rawBuild isKindOfClass:[NSString class]] ? rawBuild : @"";
     if (!v.length && !b.length) return NSLocalizedString(@"off", nil);
     return [NSString stringWithFormat:@"%@ (%@)", v.length ? v : @"?", b.length ? b : @"?"];
 }
 
 - (void)spoofVersion {
-    NSString *v = self.cacheExtra[kVersionKey] ?: [UIDevice currentDevice].systemVersion ?: @"";
-    NSString *b = self.cacheExtra[kBuildKey] ?: self.mg[@"CacheVersion"] ?: @"";
+    id rawVersion = self.cacheExtra[kVersionKey];
+    id rawBuild = self.cacheExtra[kBuildKey] ?: self.mg[@"CacheVersion"];
+    NSString *v = [rawVersion isKindOfClass:[NSString class]] ? rawVersion : [UIDevice currentDevice].systemVersion ?: @"";
+    NSString *b = [rawBuild isKindOfClass:[NSString class]] ? rawBuild : @"";
     UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Spoof iOS version", nil)
                                                                message:NSLocalizedString(@"Writes ProductVersion/BuildVersion into MobileGestalt. Apps and system components that query MG will see these values. OTA/update behavior may break. Keep the original backup.", nil)
                                                         preferredStyle:UIAlertControllerStyleAlert];
@@ -430,8 +467,8 @@ static NSString *BQValueSummary(id v) {
         [self.cacheExtra removeObjectForKey:kHumanVersionKey];
         [self.cacheExtra removeObjectForKey:kVersionExtraKey];
         BQLog(@"version spoof removed");
-        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
-                     withRowAnimation:UITableViewRowAnimationAutomatic];
+        [self synchronizeCacheExtra];
+        self.hasPendingChanges = YES;
     }]];
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Apply", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         NSString *nv = BQTrim(a.textFields[0].text);
@@ -444,8 +481,8 @@ static NSString *BQValueSummary(id v) {
         else [self.cacheExtra removeObjectForKey:kHumanVersionKey];
         [self.cacheExtra removeObjectForKey:kVersionExtraKey];
         BQLog(@"version spoof -> %@ (%@)", nv, nb);
-        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
-                     withRowAnimation:UITableViewRowAnimationAutomatic];
+        [self synchronizeCacheExtra];
+        self.hasPendingChanges = YES;
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }
@@ -483,8 +520,8 @@ static NSString *BQValueSummary(id v) {
                 self.cacheExtra[kAIKey] = @1;
                 BQLog(@"AI spoof -> %@ (%@/%@)", o[@"title"], o[@"product"], o[@"hw"]);
             }
-            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
-                         withRowAnimation:UITableViewRowAnimationAutomatic];
+            [self synchronizeCacheExtra];
+            self.hasPendingChanges = YES;
         }]];
     }
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
@@ -593,8 +630,8 @@ static NSString *BQValueSummary(id v) {
             BQLog(@"StoreDemoMode -> %d", sw.isOn);
         }];
     }
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
-                 withRowAnimation:UITableViewRowAnimationAutomatic];
+    [self synchronizeCacheExtra];
+    self.hasPendingChanges = YES;
 }
 
 #pragma mark - Actions
@@ -622,6 +659,7 @@ static NSString *BQValueSummary(id v) {
                 BQRespring();
             }]];
             [self presentViewController:a animated:YES completion:nil];
+            self.hasPendingChanges = NO;
         });
     });
 }
@@ -635,6 +673,12 @@ static NSString *BQValueSummary(id v) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [busy hide];
                 if (!ok) { BQAlert(self, NSLocalizedString(@"Revert failed", nil), err ?: NSLocalizedString(@"unknown error", nil)); return; }
+                self.mg = nil;
+                self.cacheExtra = nil;
+                self.keys = @[];
+                self.hasPendingChanges = NO;
+                self.navigationItem.rightBarButtonItems.firstObject.enabled = NO;
+                [self.tableView reloadData];
                 UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Reverted", nil)
                                                                            message:NSLocalizedString(@"Original MobileGestalt restored. Respring or reboot.", nil)
                                                                     preferredStyle:UIAlertControllerStyleAlert];
@@ -653,8 +697,8 @@ static NSString *BQValueSummary(id v) {
 - (void)addKey {
     CacheExtraEditVC *vc = [[CacheExtraEditVC alloc] initWithKey:nil value:nil isNew:YES onSave:^(NSString *key, id value) {
         self.cacheExtra[key] = value;
-        self.keys = [self.cacheExtra.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-        [self.tableView reloadData];
+        self.hasPendingChanges = YES;
+        [self synchronizeCacheExtra];
     } onDelete:nil];
     [self.navigationController pushViewController:vc animated:YES];
 }
@@ -665,9 +709,11 @@ static NSString *BQValueSummary(id v) {
     id value = self.cacheExtra[key];
     CacheExtraEditVC *vc = [[CacheExtraEditVC alloc] initWithKey:key value:value isNew:NO onSave:^(NSString *k, id v) {
         self.cacheExtra[k] = v;
+        self.hasPendingChanges = YES;
         [self.tableView reloadData];
     } onDelete:^(NSString *k) {
         [self.cacheExtra removeObjectForKey:k];
+        self.hasPendingChanges = YES;
         self.keys = [self.cacheExtra.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
         [self.tableView reloadData];
     }];
@@ -705,6 +751,9 @@ static NSString *BQValueSummary(id v) {
         case 1:
             return NSLocalizedString(@"These tweaks can break features or softbrick the device if misused. Backup exists in Documents/OriginalGestalt.plist.", nil);
         case 2:
+            if (!self.originalBackupAvailable) {
+                return [NSString stringWithFormat:@"%@ %@", NSLocalizedString(@"ArtworkDeviceSubType controls Dynamic Island position. 17/18 values are experimental; use a custom subtype if the island overlaps the status bar.", nil), NSLocalizedString(@"Original artwork backup unavailable; using the loaded subtype as fallback.", nil)];
+            }
             return NSLocalizedString(@"ArtworkDeviceSubType controls Dynamic Island position. 17/18 values are experimental; use a custom subtype if the island overlaps the status bar.", nil);
         case 3:
             return NSLocalizedString(@"Advanced tweaks are high risk. iPadOS mode patches CacheData. AI/Siri spoofing can break Face ID. Store Demo and ResearchFuse change device identity. Keep the original backup.", nil);
@@ -853,8 +902,8 @@ static NSString *BQValueSummary(id v) {
                                                                    handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
         NSString *key = self.keys[indexPath.row];
         [self.cacheExtra removeObjectForKey:key];
-        self.keys = [self.cacheExtra.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-        [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+        [self synchronizeCacheExtra];
+        self.hasPendingChanges = YES;
         BQLog(@"removed CacheExtra key %@ (in memory)", key);
         done(YES);
     }];
