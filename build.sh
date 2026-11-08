@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SDK="${SDK:-/opt/theos/sdks/iPhoneOS14.5.sdk}"
 APP_NAME="BQTool"
-VERSION="2.4.3"
+VERSION="2.4.4"
 BID="${BID:-com.kamui.escape}"
 BUILD="$ROOT/build"
 APP="$BUILD/Payload/$APP_NAME.app"
@@ -19,7 +19,6 @@ echo "[*] compiling..."
 clang \
     -target arm64-apple-ios14.0 \
     -isysroot "$SDK" \
-    -fuse-ld=lld \
     -fobjc-arc -fblocks -O2 \
     -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
     -framework UIKit \

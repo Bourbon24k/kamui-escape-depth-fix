@@ -209,7 +209,7 @@ Requirements: Linux/macOS, clang, an iOS SDK (Theos SDK works), zlib.
 
 ```bash
 ./build.sh
-# -> build/KAMUI-2.4.3.ipa
+# -> build/KAMUI-2.4.4.ipa
 ```
 
 The default bundle identifier is `com.kamui.escape`. Override with `BID=...`.
@@ -219,7 +219,7 @@ The SDK path can be overridden with `SDK=...`.
 
 ## 5. Install and runtime requirement
 
-Anyone can install `KAMUI-2.4.3.ipa`; use whatever installation method you
+Anyone can install `KAMUI-2.4.4.ipa`; use whatever installation method you
 normally use.
 
 The primary 27.2 strategy needs the running app to have at least one
@@ -383,9 +383,9 @@ use, copy, modify, merge, publish, distribute, sublicense and sell copies of
 the software, including the MobileGestalt editor, as long as the copyright and
 permission notice are preserved.
 
-`v2.4.3`:
+`v2.4.4`:
 
-- `KAMUI-2.4.3.ipa` — the app; install it on any supported device.
+- `KAMUI-2.4.4.ipa` — the app; install it on any supported device.
 - Source code and build script are in this repository.
 
 There is no allowlist and no special access. The anime name is for fun; the
