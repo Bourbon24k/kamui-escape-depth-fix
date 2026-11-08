@@ -141,6 +141,7 @@ static NSString *BQValueSummary(id v) {
         case 2622: return @"iPhone 16 Pro";
         case 2868: return @"iPhone 16 Pro Max";
         case 2736: return @"iPhone Air";
+        case 2088: return @"iPhone Duo";
         default: return [NSString stringWithFormat:@"Original (%ld)", (long)v];
     }
 }
@@ -161,6 +162,7 @@ static NSString *BQValueSummary(id v) {
         @{@"title": @"iPhone 16 Pro (2622)", @"value": @2622},
         @{@"title": @"iPhone 16 Pro Max (2868)", @"value": @2868},
         @{@"title": @"iPhone Air (2736)", @"value": @2736},
+        @{@"title": @"iPhone Duo (2088)", @"value": @2088},
     ];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Device Subtype"
                                                                message:@"Only changes the Dynamic Island position. Visual artifacts are possible."
