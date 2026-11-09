@@ -82,17 +82,12 @@
             NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
             if (!code.length) {
                 [defs removeObjectForKey:@"BQLanguageOverride"];
-                [defs removeObjectForKey:@"AppleLanguages"];
             } else {
                 [defs setObject:code forKey:@"BQLanguageOverride"];
-                [defs setObject:@[code] forKey:@"AppleLanguages"];
             }
+            [defs removeObjectForKey:@"AppleLanguages"];
             [defs synchronize];
-            UIAlertController *r = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Language", nil)
-                                                                       message:NSLocalizedString(@"Restart KAMUI to apply the language.", nil)
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-            [r addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:r animated:YES completion:nil];
+            [self dismissViewControllerAnimated:YES completion:^{ BQReloadRootViewController(); }];
         }]];
     }
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];

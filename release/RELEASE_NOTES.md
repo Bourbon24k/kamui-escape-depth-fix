@@ -1,3 +1,22 @@
+# KAMUI 2.5.1 — Explore and language fixes
+
+## What's new in 2.5.1
+
+- Keep wallpaper search and catalog filters fixed while browsing Explore.
+- Apply the selected app language immediately, independent of the system language.
+- Harden wallpaper imports, ignore macOS archive metadata, and add sanitized log sharing.
+- Show per-preset iOS requirements and device verification status.
+- Add the KAMUI layered-panels app icon.
+- Bump the app version to `2.5.1` (build `251`).
+
+## Build
+
+- App version: `2.5.1`
+- Build: `251`
+- IPA: `build/KAMUI-2.5.1.ipa`
+
+---
+
 # KAMUI 2.5.0 — full MCM container escape + Files browser
 
 ## What's new in 2.5.0

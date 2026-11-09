@@ -2,6 +2,7 @@
 #import "GestaltVC.h"
 #import "PosterBoardVC.h"
 #import "SettingsVC.h"
+#import "BQUI.h"
 #import "FilesVC.h"
 
 @implementation RootTabBarController
@@ -22,10 +23,10 @@
         };
 
     self.viewControllers = @[
-        nav([[GestaltVC alloc] init], @"Gestalt", @"slider.horizontal.3"),
-        nav([[PosterBoardVC alloc] init], @"PosterBoard", @"photo.on.rectangle"),
-        nav([[FilesVC alloc] init], @"Files", @"folder"),
-        nav([[SettingsVC alloc] init], @"Settings", @"gearshape"),
+        nav([[GestaltVC alloc] init], NSLocalizedString(@"Gestalt", nil), @"slider.horizontal.3"),
+        nav([[PosterBoardVC alloc] init], NSLocalizedString(@"PosterBoard", nil), @"photo.on.rectangle"),
+        nav([[FilesVC alloc] init], NSLocalizedString(@"Files", nil), @"folder"),
+        nav([[SettingsVC alloc] init], NSLocalizedString(@"Settings", nil), @"gearshape"),
     ];
     self.selectedIndex = 0;
 }

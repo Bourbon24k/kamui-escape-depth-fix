@@ -96,6 +96,11 @@
 "Descriptors removed. Respring to apply." = "Дескриптори видалено. Перезапустіть SpringBoard.";
 "Open failed" = "Не вдалося відкрити";
 "Search wallpapers" = "Пошук шпалер";
+"Custom" = "Власні";
+"Apple" = "Apple";
+"Show all wallpapers" = "Усі шпалери";
+"Show favorites" = "Обране";
+"Refresh catalog" = "Оновити каталог";
 "Apply now" = "Застосувати зараз";
 "Applying wallpaper..." = "Застосування шпалер...";
 "Downloaded" = "Завантажено";

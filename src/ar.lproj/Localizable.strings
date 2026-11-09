@@ -96,6 +96,11 @@
 "Descriptors removed. Respring to apply." = "تمت إزالة الواصفات. أعد تشغيل SpringBoard.";
 "Open failed" = "فشل الفتح";
 "Search wallpapers" = "البحث عن خلفيات";
+"Custom" = "مخصص";
+"Apple" = "Apple";
+"Show all wallpapers" = "كل الخلفيات";
+"Show favorites" = "عرض المفضلة";
+"Refresh catalog" = "تحديث الكتالوج";
 "Apply now" = "تطبيق الآن";
 "Applying wallpaper..." = "تطبيق الخلفية...";
 "Downloaded" = "تم التنزيل";

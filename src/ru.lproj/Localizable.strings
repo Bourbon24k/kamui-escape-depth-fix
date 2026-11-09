@@ -96,6 +96,11 @@
 "Descriptors removed. Respring to apply." = "Дескрипторы удалены. Перезапустите SpringBoard.";
 "Open failed" = "Не удалось открыть";
 "Search wallpapers" = "Поиск обоев";
+"Custom" = "Свои";
+"Apple" = "Apple";
+"Show all wallpapers" = "Все обои";
+"Show favorites" = "Избранное";
+"Refresh catalog" = "Обновить каталог";
 "Apply now" = "Применить сейчас";
 "Applying wallpaper..." = "Применение обоев...";
 "Downloaded" = "Загружено";
@@ -130,6 +135,11 @@
 "escape failed (%lld)" = "escape не удался (%lld)";
 "Retry" = "Повторить";
 "MobileGestalt is not loaded. The read failed; check the log and retry." = "MobileGestalt не загружен. Чтение не удалось; проверьте журнал и повторите.";
+"Requires iOS %ld or later" = "Требуется iOS %ld или новее";
+"Verified on this device and iOS version" = "Проверено на этом устройстве и версии iOS";
+"Not verified on %@ · iOS %ld" = "Не проверено на %@ · iOS %ld";
+"Device compatibility not verified · iOS %ld" = "Совместимость не проверена · iOS %ld";
+"Share" = "Поделиться";
 "Files" = "Файлы";
 "Containers" = "Контейнеры";
 "App Data" = "Данные приложений";

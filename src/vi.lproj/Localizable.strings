@@ -96,6 +96,11 @@
 "Descriptors removed. Respring to apply." = "Đã xóa bộ mô tả. Khởi động lại SpringBoard.";
 "Open failed" = "Mở thất bại";
 "Search wallpapers" = "Tìm hình nền";
+"Custom" = "Tùy chỉnh";
+"Apple" = "Apple";
+"Show all wallpapers" = "Tất cả hình nền";
+"Show favorites" = "Hiện mục yêu thích";
+"Refresh catalog" = "Làm mới danh mục";
 "Apply now" = "Áp dụng ngay";
 "Applying wallpaper..." = "Đang áp dụng hình nền...";
 "Downloaded" = "Đã tải";
