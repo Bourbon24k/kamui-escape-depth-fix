@@ -1,21 +1,40 @@
-# KAMUI 2.5.0 — safer wallpaper imports and diagnostics
+# KAMUI 2.5.1 — Explore and language fixes
 
-## What's new in 2.5.0
+## What's new in 2.5.1
 
-- Make wallpaper imports transactional: stage descriptor writes, verify installed descriptors, and keep rollback copies for both descriptor and full-container imports until the copy completes.
-- Ignore macOS archive metadata such as `.DS_Store` and `._*` files during wallpaper extraction.
-- Add sanitized log sharing from the Log screen for easier troubleshooting.
-- Show per-preset iOS requirements and whether the current device/version has been verified.
-- Keep wallpaper search and catalog filters fixed while browsing the Explore list.
+- Keep wallpaper search and catalog filters fixed while browsing Explore.
 - Apply the selected app language immediately, independent of the system language.
-- Add the new KAMUI layered-panels app icon.
-- Bump the app version to `2.5.0` (build `2500`).
+- Harden wallpaper imports, ignore macOS archive metadata, and add sanitized log sharing.
+- Show per-preset iOS requirements and device verification status.
+- Add the KAMUI layered-panels app icon.
+- Bump the app version to `2.5.1` (build `251`).
 
 ## Build
 
-- App version: `2.5.0`
-- Build: `2500`
-- IPA: `build/KAMUI-2.5.0.ipa`
+- App version: `2.5.1`
+- Build: `251`
+- IPA: `build/KAMUI-2.5.1.ipa`
+
+---
+
+# KAMUI 2.5.0 — full MCM container escape + Files browser
+
+## What's new in 2.5.0
+
+- **Files tab / full MCM container access**: browse app data, app groups,
+  system groups, system data, internal daemons and plugins. Read, edit text,
+  import and delete files through the class-7 escape.
+- **Crash fix**: the post-load Gestalt key-sorting crash is fixed; keys are
+  filtered to strings and sorted with CoreFoundation.
+- **Localization** for the Files UI in English, Russian, Korean, Arabic,
+  Turkish, Ukrainian and Vietnamese.
+- All 2.4.16 Explore, Gestalt and import hardening is retained.
+
+### Scope
+
+This is full access across **MCM containers**, not root or arbitrary
+filesystem access. A symlink inside a container to a path outside MCM is still
+denied by the sandbox.
 
 ---
 
@@ -139,13 +158,13 @@ the MobileGestalt editor.
   their original descriptor UUIDs.
 - **Class-12 geod built-in container**: direct part-3 token for
   `com.apple.geod` (flags `0x8000000000`, `0x0800000000`, `0x8100000000`), then
-  a symlinked `Library/Caches` to the target. This is the free-certificate
+  a symlinked `Library/Caches` to the target. This is the free-account
   route that does not require an app group or a restricted bundle ID.
-- **Free-certificate bad_query file form**: class 13, MobileGestalt
+- **Free-account bad_query file form**: class 13, MobileGestalt
   SystemGroup, part 3, an 8-level `..` traversal to
   `com.apple.MobileGestalt.plist`, flags `0x8000000000` (no include-path bit).
   This is the form used by GestaltEdit on iOS 27 and the one that has worked
-  for some free Apple ID signatures.
+  for some free Apple ID installs.
 - **Class-2 `RENAME_SWAP` probe**: atomically swaps `Library/Caches` with a
   symlink to the target, queries class 2, then swaps back. This may bypass the
   plain-rename denial without moving Library or causing the 2.2 crash.

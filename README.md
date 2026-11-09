@@ -32,17 +32,17 @@ without an app group.
 
 ## 1. What this is
 
-KAMUI is a **partial sandbox escape**: a normally sandboxed app obtains a
-read/write sandbox extension for a path outside its own containers. It is not
-root, not a kernel exploit and not a full filesystem escape. It is exactly
-enough to:
+KAMUI is a **container-level sandbox escape**: a normally sandboxed app
+obtains a read/write sandbox extension for an MCM container outside its own
+sandbox. It is not root and not a kernel exploit; arbitrary paths outside MCM
+remain protected. It is enough to:
 
 - read and write the live **MobileGestalt** cache
   (`systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist`);
 - install custom **PosterBoard** wallpapers (`.tendies` descriptors) into the
   Collections, Mercury and Photos providers;
-- read and write other **MCM containers** whose path is known (app data, app
-  group, SystemGroup).
+- read and write **every MCM container**: app data, app groups, system groups,
+  system data, internal daemons and plugins.
 
 The included app is a full UIKit toolbox:
 
@@ -52,6 +52,9 @@ The included app is a full UIKit toolbox:
   String/Integer/Boolean/Data), apply/revert/respring, backup.
 - **PosterBoard** — import `.tendies`, apply all, online wallpaper catalog
   (`SerStars/Nugget-Wallpapers`), reset, open PosterBoard, respring.
+- **Files** — full MCM container browser: app data, app groups, system groups,
+  system data, internal daemons and plugins; browse, read, edit text, import
+  and delete files through the class-7 escape.
 - **Settings** — diagnostics, in-place/atomic write toggle, log viewer.
 
 ---
@@ -164,7 +167,9 @@ Confirmed on 27.2 (redacted):
   - `com.apple.MercuryPoster/descriptors`
   - `com.apple.PhotosUIPrivate.PhotosPosterProvider/descriptors`
 - **App data containers** — 245 containers enumerated with `fsgetpath` and
-  opened with tokens.
+  opened with tokens; the Files tab reaches 245 app data containers, 114 app
+  groups, 27 system groups, 22 system data containers, 21 internal daemons and
+  877 plugins on 27.2.
 - **PosterBoard `.tendies` pipeline** — 25-file ZIP extracted, descriptor
   found, IDs randomized, folder written to the WallpaperKit provider.
 
@@ -243,6 +248,9 @@ escape: using class7 symlink
 
 ## 8. Version notes
 
+- **2.5.0** — adds the Files tab / full MCM container browser and fixes the
+  post-load Gestalt key-sorting crash. Arbitrary paths outside MCM remain
+  blocked.
 - **27.2 (24B115)** — primary, tested: class-13 traversal closed; class-7
   part-directory symlink works.
 - **27.0.1 / 27.1** — the class-13 traversal or class-12 geod fallback may
@@ -327,9 +335,9 @@ use, copy, modify, merge, publish, distribute, sublicense and sell copies of
 the software, including the MobileGestalt editor, as long as the copyright and
 permission notice are preserved.
 
-`v2.4.11`:
+`v2.5.0`:
 
-- `KAMUI-2.4.11.ipa` — the app; install it on any supported device.
+- `KAMUI-2.5.0.ipa` — the app; install it on any supported device.
 - Source code and build script are in this repository.
 
 There is no allowlist and no special access. The anime name is for fun; the
