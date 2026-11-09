@@ -2,6 +2,7 @@
 #import "GestaltVC.h"
 #import "PosterBoardVC.h"
 #import "SettingsVC.h"
+#import "FilesVC.h"
 
 @implementation RootTabBarController
 
@@ -23,6 +24,7 @@
     self.viewControllers = @[
         nav([[GestaltVC alloc] init], @"Gestalt", @"slider.horizontal.3"),
         nav([[PosterBoardVC alloc] init], @"PosterBoard", @"photo.on.rectangle"),
+        nav([[FilesVC alloc] init], @"Files", @"folder"),
         nav([[SettingsVC alloc] init], @"Settings", @"gearshape"),
     ];
     self.selectedIndex = 0;

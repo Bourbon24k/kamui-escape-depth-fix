@@ -12,7 +12,7 @@ if [ -z "${SDK:-}" ]; then
     fi
 fi
 APP_NAME="BQTool"
-VERSION="2.4.16"
+VERSION="2.5.0"
 BID="${BID:-com.kamui.escape}"
 BUILD="$ROOT/build"
 APP="$BUILD/Payload/$APP_NAME.app"
@@ -50,6 +50,7 @@ clang \
     "$ROOT/src/TendiesExploreVC.m" \
     "$ROOT/src/SettingsVC.m" \
     "$ROOT/src/LogVC.m" \
+    "$ROOT/src/FilesVC.m" \
     "$ROOT/src/BQUI.m" \
     "$ROOT/src/BQCore.m" \
     -o "$APP/$APP_NAME"

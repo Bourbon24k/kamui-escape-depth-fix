@@ -46,3 +46,13 @@ NSArray<NSString *> *BQPosterBoardExtensions(void);
 
 // ---- respring (NeoSpring / WebKit) ----------------------------------------
 void BQRespring(void);
+
+// ---- container browser (full MCM container access) ------------------------
+NSArray<NSString *> *BQContainerRoots(void);
+NSArray<NSString *> *BQListContainers(NSString *root);
+NSDictionary *BQContainerInfo(NSString *container);
+NSArray<NSString *> *BQListPath(NSString *container, NSString *rel, NSString **err);
+NSData *BQReadPath(NSString *container, NSString *rel, NSString **err);
+BOOL BQWritePath(NSString *container, NSString *rel, NSData *data, NSString **err);
+BOOL BQDeletePath(NSString *container, NSString *rel, NSString **err);
+NSDictionary *BQStatPath(NSString *container, NSString *rel, NSString **err);

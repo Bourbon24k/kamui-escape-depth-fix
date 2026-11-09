@@ -8,12 +8,20 @@
     BQCoreInit();
 
     if (!BQGroupID().length) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            BQAlert(nil, @"No app group entitlement",
-                    @"This build has no com.apple.security.application-groups entry.\n\n"
-                    @"The app will try the legacy class-13 traversal fallback (works on some 27.0.x builds). "
-                    @"On 27.2 the class-7 path needs at least one app group. "
-                    @"See Documents/bqtool.log for the per-strategy result.");
+        BQLog(@"no app group; class7 path unavailable, class13/class12 fallbacks only");
+    }
+
+    if ([[NSProcessInfo processInfo].arguments containsObject:@"--bqfileselftest"]) {
+        dispatch_async(BQWorkQueue(), ^{
+            for (NSString *root in BQContainerRoots()) {
+                NSArray *ids = BQListContainers(root);
+                BQLog(@"fileselftest root=%@ count=%lu first=%@", root, (unsigned long)ids.count, ids.firstObject ?: @"-");
+            }
+            NSString *pb = BQFindPosterBoardContainer(NULL);
+            if (pb.length) {
+                NSArray *items = BQListPath(pb, @"", NULL);
+                BQLog(@"fileselftest PB=%@ items=%lu first=%@", pb, (unsigned long)items.count, items.firstObject ?: @"-");
+            }
         });
     }
 

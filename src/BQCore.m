@@ -645,6 +645,105 @@ NSDictionary *BQProbeClass2Parts(NSString *target) {
     return r;
 }
 
+
+NSArray<NSString *> *BQContainerRoots(void) {
+    return @[
+        @"/var/mobile/Containers/Data/Application",
+        @"/var/mobile/Containers/Shared/AppGroup",
+        @"/var/containers/Shared/SystemGroup",
+        @"/var/containers/Data/System",
+        @"/var/mobile/Containers/Data/InternalDaemon",
+        @"/var/mobile/Containers/Data/PluginKitPlugin",
+    ];
+}
+
+NSArray<NSString *> *BQListContainers(NSString *root) {
+    char *lst = bq_list(root.fileSystemRepresentation, 400000);
+    if (!lst) return @[];
+    NSString *s = [NSString stringWithUTF8String:lst];
+    free(lst);
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSString *line in [s componentsSeparatedByString:@"\n"]) {
+        if (line.length) [out addObject:line];
+    }
+    [out sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    return out;
+}
+
+NSDictionary *BQContainerInfo(NSString *container) {
+    NSData *data = BQReadPath(container, @".com.apple.mobile_container_manager.metadata.plist", NULL);
+    if (!data.length) return @{};
+    id plist = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:nil];
+    return [plist isKindOfClass:[NSDictionary class]] ? plist : @{};
+}
+
+static NSString *bq_path_in_container(NSString *container, NSString *rel, NSString **linkOut, int64_t *handleOut) {
+    NSString *link = nil;
+    int64_t h = BQEscape(container, &link);
+    if (h < 0) return nil;
+    NSString *p = rel.length ? [link stringByAppendingPathComponent:rel] : link;
+    if (linkOut) *linkOut = link;
+    if (handleOut) *handleOut = h;
+    return p;
+}
+
+NSArray<NSString *> *BQListPath(NSString *container, NSString *rel, NSString **err) {
+    int64_t h = -1;
+    NSString *p = bq_path_in_container(container, rel, NULL, &h);
+    if (!p) { if (err) *err = @"escape failed"; return @[]; }
+    NSError *e = nil;
+    NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:p error:&e];
+    BQEndEscape(h);
+    if (!items) { if (err) *err = e.localizedDescription ?: @"list failed"; return @[]; }
+    return [items sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+}
+
+NSData *BQReadPath(NSString *container, NSString *rel, NSString **err) {
+    int64_t h = -1;
+    NSString *p = bq_path_in_container(container, rel, NULL, &h);
+    if (!p) { if (err) *err = @"escape failed"; return nil; }
+    NSError *e = nil;
+    NSData *data = [NSData dataWithContentsOfFile:p options:0 error:&e];
+    BQEndEscape(h);
+    if (!data && err) *err = e.localizedDescription ?: @"read failed";
+    return data;
+}
+
+BOOL BQWritePath(NSString *container, NSString *rel, NSData *data, NSString **err) {
+    int64_t h = -1;
+    NSString *p = bq_path_in_container(container, rel, NULL, &h);
+    if (!p) { if (err) *err = @"escape failed"; return NO; }
+    [[NSFileManager defaultManager] createDirectoryAtPath:p.stringByDeletingLastPathComponent
+                              withIntermediateDirectories:YES attributes:nil error:nil];
+    NSError *e = nil;
+    BOOL ok = [data writeToFile:p options:NSDataWritingAtomic error:&e];
+    BQEndEscape(h);
+    if (!ok && err) *err = e.localizedDescription ?: @"write failed";
+    return ok;
+}
+
+BOOL BQDeletePath(NSString *container, NSString *rel, NSString **err) {
+    int64_t h = -1;
+    NSString *p = bq_path_in_container(container, rel, NULL, &h);
+    if (!p) { if (err) *err = @"escape failed"; return NO; }
+    NSError *e = nil;
+    BOOL ok = [[NSFileManager defaultManager] removeItemAtPath:p error:&e];
+    BQEndEscape(h);
+    if (!ok && err) *err = e.localizedDescription ?: @"delete failed";
+    return ok;
+}
+
+NSDictionary *BQStatPath(NSString *container, NSString *rel, NSString **err) {
+    int64_t h = -1;
+    NSString *p = bq_path_in_container(container, rel, NULL, &h);
+    if (!p) { if (err) *err = @"escape failed"; return nil; }
+    struct stat st;
+    int r = stat(p.fileSystemRepresentation, &st);
+    BQEndEscape(h);
+    if (r != 0) { if (err) *err = [NSString stringWithFormat:@"stat: %s", strerror(errno)]; return nil; }
+    return @{@"isDir": @(S_ISDIR(st.st_mode)), @"size": @(st.st_size)};
+}
+
 BOOL BQCheckAccess(NSString *target, BOOL writable, NSString **err) {
     NSString *link = nil;
     int64_t h = BQEscape(target, &link);

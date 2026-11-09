@@ -1,3 +1,24 @@
+# KAMUI 2.5.0 — full MCM container escape + Files browser
+
+## What's new in 2.5.0
+
+- **Files tab / full MCM container access**: browse app data, app groups,
+  system groups, system data, internal daemons and plugins. Read, edit text,
+  import and delete files through the class-7 escape.
+- **Crash fix**: the post-load Gestalt key-sorting crash is fixed; keys are
+  filtered to strings and sorted with CoreFoundation.
+- **Localization** for the Files UI in English, Russian, Korean, Arabic,
+  Turkish, Ukrainian and Vietnamese.
+- All 2.4.16 Explore, Gestalt and import hardening is retained.
+
+### Scope
+
+This is full access across **MCM containers**, not root or arbitrary
+filesystem access. A symlink inside a container to a path outside MCM is still
+denied by the sandbox.
+
+---
+
 # KAMUI 2.4.16 — fix Explore filter contrast
 
 ## What's new in 2.4.16
