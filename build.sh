@@ -2,9 +2,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-SDK="${SDK:-/opt/theos/sdks/iPhoneOS14.5.sdk}"
+if [ -z "${SDK:-}" ]; then
+    if [ -d /opt/theos/sdks/iPhoneOS14.5.sdk ]; then
+        SDK="/opt/theos/sdks/iPhoneOS14.5.sdk"
+    elif command -v xcrun >/dev/null 2>&1; then
+        SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+    else
+        SDK="/opt/theos/sdks/iPhoneOS14.5.sdk"
+    fi
+fi
 APP_NAME="BQTool"
-VERSION="2.4.3"
+VERSION="2.4.16"
 BID="${BID:-com.kamui.escape}"
 BUILD="$ROOT/build"
 APP="$BUILD/Payload/$APP_NAME.app"
@@ -16,10 +24,14 @@ rm -rf "$BUILD"
 mkdir -p "$APP"
 
 echo "[*] compiling..."
+LINKER_FLAGS=()
+if [ "$(uname -s)" = "Linux" ]; then
+    LINKER_FLAGS=(-fuse-ld=lld)
+fi
 clang \
     -target arm64-apple-ios14.0 \
     -isysroot "$SDK" \
-    -fuse-ld=lld \
+    "${LINKER_FLAGS[@]}" \
     -fobjc-arc -fblocks -O2 \
     -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
     -framework UIKit \
@@ -30,6 +42,7 @@ clang \
     -L"$SDK/usr/lib" -lz \
     "$ROOT/src/main.m" \
     "$ROOT/src/AppDelegate.m" \
+    "$ROOT/src/SceneDelegate.m" \
     "$ROOT/src/RootTabBarController.m" \
     "$ROOT/src/GestaltVC.m" \
     "$ROOT/src/CacheExtraEditVC.m" \
@@ -42,9 +55,21 @@ clang \
     -o "$APP/$APP_NAME"
 
 cp "$ROOT/src/Info.plist" "$APP/Info.plist"
+python3 - "$APP/Info.plist" "$BID" <<'PY'
+import plistlib
+import sys
+
+path, bundle_id = sys.argv[1:]
+with open(path, "rb") as source:
+    info = plistlib.load(source)
+info["CFBundleIdentifier"] = bundle_id
+with open(path, "wb") as target:
+    plistlib.dump(info, target, fmt=plistlib.FMT_XML, sort_keys=False)
+PY
 cp "$ROOT/src/respring.html" "$APP/respring.html"
-for lproj in "$ROOT"/src/*.lproj; do
-    [ -d "$lproj" ] && cp -R "$lproj" "$APP/"
+for localization in "$ROOT"/src/*.lproj; do
+    [ -d "$localization" ] || continue
+    cp -R "$localization" "$APP/"
 done
 
 echo "[*] packing..."
