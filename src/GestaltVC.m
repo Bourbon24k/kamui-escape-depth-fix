@@ -367,13 +367,7 @@ static NSString *BQValueSummary(id v) {
 
 - (NSString *)subtypeNameForValue:(NSInteger)v {
     switch (v) {
-        case 2436: return @"iPhone X gestures (2436)";
-        case 2556: return @"iPhone 14 Pro / 15 Pro (2556)";
-        case 2796: return @"iPhone 14 Pro Max (2796)";
-        case 2976: return @"iPhone 15 Pro Max / 17 (2976)";
-        case 2622: return @"iPhone 16 Pro / 17 Pro (2622)";
-        case 2868: return @"iPhone 16 Pro Max / 17 Pro Max (2868)";
-        case 2736: return @"iPhone Air (2736)";
+
         default: return [NSString stringWithFormat:@"Original (%ld)", (long)v];
     }
 }
@@ -440,7 +434,7 @@ static NSString *BQValueSummary(id v) {
         @{@"title": @"iPhone 16 Pro / 17 Pro (2622)", @"value": @2622},
         @{@"title": @"iPhone 16 Pro Max / 17 Pro Max (2868)", @"value": @2868},
         @{@"title": @"iPhone Air (2736)", @"value": @2736},
-        @{@"title": @"iPhone 17 / 18 (custom subtype...)", @"value": @(-1)},
+
     ];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Dynamic Island model", nil)
                                                                message:NSLocalizedString(@"Sets ArtworkDeviceSubType and enables Dynamic Island. 17/18 values are experimental; use a custom subtype if the island position is wrong.", nil)
