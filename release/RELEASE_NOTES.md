@@ -139,13 +139,13 @@ the MobileGestalt editor.
   their original descriptor UUIDs.
 - **Class-12 geod built-in container**: direct part-3 token for
   `com.apple.geod` (flags `0x8000000000`, `0x0800000000`, `0x8100000000`), then
-  a symlinked `Library/Caches` to the target. This is the free-certificate
+  a symlinked `Library/Caches` to the target. This is the free-account
   route that does not require an app group or a restricted bundle ID.
-- **Free-certificate bad_query file form**: class 13, MobileGestalt
+- **Free-account bad_query file form**: class 13, MobileGestalt
   SystemGroup, part 3, an 8-level `..` traversal to
   `com.apple.MobileGestalt.plist`, flags `0x8000000000` (no include-path bit).
   This is the form used by GestaltEdit on iOS 27 and the one that has worked
-  for some free Apple ID signatures.
+  for some free Apple ID installs.
 - **Class-2 `RENAME_SWAP` probe**: atomically swaps `Library/Caches` with a
   symlink to the target, queries class 2, then swaps back. This may bypass the
   plain-rename denial without moving Library or causing the 2.2 crash.
