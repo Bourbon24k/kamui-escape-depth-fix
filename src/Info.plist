@@ -12,6 +12,8 @@
 	<string>com.kamui.escape</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>KAMUI</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
@@ -22,12 +24,10 @@
 		<string>uk</string>
 		<string>vi</string>
 	</array>
-	<key>CFBundleName</key>
-	<string>KAMUI</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.4.4</string>
+	<string>2.4.16</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -40,13 +40,30 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>243</string>
+	<string>2416</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>14.0</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>

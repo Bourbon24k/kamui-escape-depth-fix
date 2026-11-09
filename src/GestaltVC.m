@@ -44,6 +44,30 @@ static NSString *BQTrim(NSString *s) {
     return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static BOOL BQSafeBoolValue(id value) {
+    if ([value isKindOfClass:[NSNumber class]] || [value isKindOfClass:[NSString class]]) {
+        return [value boolValue];
+    }
+    return NO;
+}
+
+static BOOL BQStringValueEquals(id value, NSString *expected) {
+    return [value isKindOfClass:[NSString class]] && [value isEqualToString:expected];
+}
+
+static NSArray<NSString *> *BQSortedStringKeys(NSDictionary *dictionary) {
+    NSMutableArray<NSString *> *keys = [NSMutableArray array];
+    for (id key in dictionary.allKeys) {
+        if ([key isKindOfClass:[NSString class]]) [keys addObject:key];
+    }
+    [keys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return (NSComparisonResult)CFStringCompare((__bridge CFStringRef)a,
+                                                   (__bridge CFStringRef)b,
+                                                   kCFCompareCaseInsensitive);
+    }];
+    return [keys copy];
+}
+
 // Port of the Nugget iPadOS CacheData patch. It flips one nibble in the
 // binary CacheData blob after locating the marker at hex offset 1616..1816.
 static NSData *BQPatchIPadOSCacheData(NSData *data, NSString **err) {
@@ -148,6 +172,9 @@ static NSString *BQValueSummary(id v) {
 @property (nonatomic, assign) BOOL loading;
 @property (nonatomic, assign) BOOL hasPendingChanges;
 @property (nonatomic, assign) BOOL originalBackupAvailable;
+@property (nonatomic, assign) NSUInteger changeGeneration;
+@property (nonatomic, assign) BOOL applying;
+@property (nonatomic, strong) UIBarButtonItem *applyButton;
 @end
 
 @implementation GestaltVC
@@ -168,6 +195,7 @@ static NSString *BQValueSummary(id v) {
     UIBarButtonItem *add = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
                                                                          target:self
                                                                          action:@selector(addKey)];
+    self.applyButton = apply;
     apply.enabled = NO;
     self.navigationItem.rightBarButtonItems = @[apply, add];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Revert", nil)
@@ -209,6 +237,7 @@ static NSString *BQValueSummary(id v) {
         [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
         [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Reload", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
             self.hasPendingChanges = NO;
+            self.changeGeneration++;
             [self loadGestalt];
         }]];
         [self presentViewController:a animated:YES completion:nil];
@@ -230,7 +259,7 @@ static NSString *BQValueSummary(id v) {
             [self.refreshControl endRefreshing];
             self.loading = NO;
             if (!mg) {
-                self.navigationItem.rightBarButtonItems.firstObject.enabled = NO;
+                self.applyButton.enabled = NO;
                 self.mg = nil;
                 self.keys = @[];
                 [self.tableView reloadData];
@@ -245,16 +274,18 @@ static NSString *BQValueSummary(id v) {
                 [self presentViewController:a animated:YES completion:nil];
                 return;
             }
-            self.navigationItem.rightBarButtonItems.firstObject.enabled = YES;
+            self.applyButton.enabled = YES;
             self.mg = mg;
             NSMutableDictionary *ce = [mg[@"CacheExtra"] isKindOfClass:[NSDictionary class]]
                 ? [mg[@"CacheExtra"] mutableCopy] : [NSMutableDictionary dictionary];
             mg[@"CacheExtra"] = ce;
             self.cacheExtra = ce;
-            self.keys = [ce.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-            NSDictionary *bak = [NSDictionary dictionaryWithContentsOfFile:BQBackupPath()];
+            self.keys = BQSortedStringKeys(ce);
+            id backupValue = [NSDictionary dictionaryWithContentsOfFile:BQBackupPath()];
+            NSDictionary *bak = [backupValue isKindOfClass:[NSDictionary class]] ? backupValue : nil;
             self.originalBackupAvailable = NO;
-            NSDictionary *bakCE = [bak[@"CacheExtra"] isKindOfClass:[NSDictionary class]] ? bak[@"CacheExtra"] : @{};
+            id backupCEValue = bak[@"CacheExtra"];
+            NSDictionary *bakCE = [backupCEValue isKindOfClass:[NSDictionary class]] ? backupCEValue : @{};
             id backupArtValue = bakCE[kArtKey];
             NSDictionary *art = [backupArtValue isKindOfClass:[NSDictionary class]] ? backupArtValue : nil;
             id backupSubtype = art[@"ArtworkDeviceSubType"];
@@ -264,14 +295,22 @@ static NSString *BQValueSummary(id v) {
             id liveSubtype = liveArt[@"ArtworkDeviceSubType"];
             self.originalSubtype = [backupSubtype isKindOfClass:[NSNumber class]] ? [backupSubtype integerValue] :
                 ([liveSubtype isKindOfClass:[NSNumber class]] ? [liveSubtype integerValue] : 0);
-            self.originalCacheData = bak[@"CacheData"] ?: mg[@"CacheData"];
-            self.originalProductType = bakCE[kProductTypeKey] ?: ce[kProductTypeKey];
-            self.originalHardware = bakCE[kHardwareKey] ?: ce[kHardwareKey];
-            self.originalCPU = bakCE[kCPUKey] ?: ce[kCPUKey];
-            self.originalRegulatory = bakCE[kRegulatoryKey] ?: ce[kRegulatoryKey];
-            self.originalSiriRegion = bakCE[kSiriRegionKey] ?: ce[kSiriRegionKey];
-            self.originalSiriRegionCode = bakCE[kSiriRegionCodeKey] ?: ce[kSiriRegionCodeKey];
+            id backupData = bak[@"CacheData"];
+            id liveData = mg[@"CacheData"];
+            self.originalCacheData = [backupData isKindOfClass:[NSData class]] ? backupData :
+                ([liveData isKindOfClass:[NSData class]] ? liveData : nil);
+            id (^originalString)(id, id) = ^id(id backup, id live) {
+                return [backup isKindOfClass:[NSString class]] ? backup :
+                    ([live isKindOfClass:[NSString class]] ? live : nil);
+            };
+            self.originalProductType = originalString(bakCE[kProductTypeKey], ce[kProductTypeKey]);
+            self.originalHardware = originalString(bakCE[kHardwareKey], ce[kHardwareKey]);
+            self.originalCPU = originalString(bakCE[kCPUKey], ce[kCPUKey]);
+            self.originalRegulatory = originalString(bakCE[kRegulatoryKey], ce[kRegulatoryKey]);
+            self.originalSiriRegion = originalString(bakCE[kSiriRegionKey], ce[kSiriRegionKey]);
+            self.originalSiriRegionCode = originalString(bakCE[kSiriRegionCodeKey], ce[kSiriRegionCodeKey]);
             self.hasPendingChanges = NO;
+            self.changeGeneration = 0;
             [self.tableView reloadData];
         });
     });
@@ -299,20 +338,26 @@ static NSString *BQValueSummary(id v) {
     } else {
         for (NSString *k in p[@"keys"]) [self.cacheExtra removeObjectForKey:k];
     }
-    self.hasPendingChanges = YES;
+    [self markPendingChanges];
     [self synchronizeCacheExtra];
     BQLog(@"preset %@ -> %d (in memory)", p[@"title"], sw.isOn);
 }
 
+- (void)markPendingChanges {
+    self.changeGeneration++;
+    self.hasPendingChanges = YES;
+    self.applyButton.enabled = !self.applying;
+}
+
 - (void)synchronizeCacheExtra {
-    self.keys = [self.cacheExtra.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    self.keys = BQSortedStringKeys(self.cacheExtra);
     [self.tableView reloadData];
 }
 
 #pragma mark - Dynamic Island
 
 - (BOOL)islandOn {
-    return [self.cacheExtra[kIslandKey] boolValue];
+    return BQSafeBoolValue(self.cacheExtra[kIslandKey]);
 }
 
 - (NSMutableDictionary *)artwork {
@@ -354,7 +399,7 @@ static NSString *BQValueSummary(id v) {
         [self.cacheExtra removeObjectForKey:kIslandKey];
     }
     BQLog(@"dynamic island -> %d", sw.isOn);
-    self.hasPendingChanges = YES;
+    [self markPendingChanges];
     [self synchronizeCacheExtra];
 }
 
@@ -365,7 +410,7 @@ static NSString *BQValueSummary(id v) {
     else if (self.originalBackupAvailable) [art removeObjectForKey:@"ArtworkDeviceSubType"];
     if (art.count) self.cacheExtra[kArtKey] = art;
     else [self.cacheExtra removeObjectForKey:kArtKey];
-    self.hasPendingChanges = YES;
+    [self markPendingChanges];
     [self synchronizeCacheExtra];
 }
 
@@ -381,7 +426,7 @@ static NSString *BQValueSummary(id v) {
     if (art.count) self.cacheExtra[kArtKey] = art;
     else [self.cacheExtra removeObjectForKey:kArtKey];
     BQLog(@"subtype -> %ld", (long)v);
-    self.hasPendingChanges = YES;
+    [self markPendingChanges];
     [self synchronizeCacheExtra];
 }
 
@@ -468,7 +513,7 @@ static NSString *BQValueSummary(id v) {
         [self.cacheExtra removeObjectForKey:kVersionExtraKey];
         BQLog(@"version spoof removed");
         [self synchronizeCacheExtra];
-        self.hasPendingChanges = YES;
+        [self markPendingChanges];
     }]];
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Apply", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         NSString *nv = BQTrim(a.textFields[0].text);
@@ -482,13 +527,14 @@ static NSString *BQValueSummary(id v) {
         [self.cacheExtra removeObjectForKey:kVersionExtraKey];
         BQLog(@"version spoof -> %@ (%@)", nv, nb);
         [self synchronizeCacheExtra];
-        self.hasPendingChanges = YES;
+        [self markPendingChanges];
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }
 
 - (NSString *)aiModelName {
-    NSString *p = self.cacheExtra[kProductTypeKey];
+    id rawProduct = self.cacheExtra[kProductTypeKey];
+    NSString *p = [rawProduct isKindOfClass:[NSString class]] ? rawProduct : nil;
     for (NSDictionary *o in BQAIModelOptions()) {
         NSString *op = o[@"product"];
         if (op.length && [p isEqualToString:op]) return o[@"title"];
@@ -521,7 +567,7 @@ static NSString *BQValueSummary(id v) {
                 BQLog(@"AI spoof -> %@ (%@/%@)", o[@"title"], o[@"product"], o[@"hw"]);
             }
             [self synchronizeCacheExtra];
-            self.hasPendingChanges = YES;
+            [self markPendingChanges];
         }]];
     }
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
@@ -531,23 +577,25 @@ static NSString *BQValueSummary(id v) {
     [self presentViewController:a animated:YES completion:nil];
 }
 
-- (BOOL)aiOn { return [self.cacheExtra[kAIKey] boolValue]; }
+- (BOOL)aiOn { return BQSafeBoolValue(self.cacheExtra[kAIKey]); }
 - (BOOL)siriOn {
-    return [self.cacheExtra[kSiriRegionKey] isEqualToString:@"LL"] &&
-           [self.cacheExtra[kSiriRegionCodeKey] isEqualToString:@"LL/A"];
+    return BQStringValueEquals(self.cacheExtra[kSiriRegionKey], @"LL") &&
+           BQStringValueEquals(self.cacheExtra[kSiriRegionCodeKey], @"LL/A");
 }
 - (BOOL)ipadOSOn {
     for (NSString *key in BQIPadOSKeys()) {
-        if (![self.cacheExtra[key] boolValue]) return NO;
+        if (!BQSafeBoolValue(self.cacheExtra[key])) return NO;
     }
     return YES;
 }
-- (BOOL)researchOn { return [self.cacheExtra[kResearchKey] boolValue]; }
-- (BOOL)storeDemoOn { return [self.cacheExtra[kStoreDemoKey] boolValue]; }
+- (BOOL)researchOn { return BQSafeBoolValue(self.cacheExtra[kResearchKey]); }
+- (BOOL)storeDemoOn { return BQSafeBoolValue(self.cacheExtra[kStoreDemoKey]); }
 
 - (void)riskySwitch:(UISwitch *)sw title:(NSString *)title message:(NSString *)message action:(void (^)(void))action {
     if (!sw.isOn) {
         action();
+        [self synchronizeCacheExtra];
+        [self markPendingChanges];
         return;
     }
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title
@@ -556,8 +604,10 @@ static NSString *BQValueSummary(id v) {
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) {
         sw.on = NO;
     }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Continue" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
+    [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Continue", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
         action();
+        [self synchronizeCacheExtra];
+        [self markPendingChanges];
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }
@@ -630,26 +680,31 @@ static NSString *BQValueSummary(id v) {
             BQLog(@"StoreDemoMode -> %d", sw.isOn);
         }];
     }
-    [self synchronizeCacheExtra];
-    self.hasPendingChanges = YES;
 }
 
 #pragma mark - Actions
 
 - (void)applyTweaks {
+    if (self.applying) return;
     if (!self.mg) {
         BQAlert(self, NSLocalizedString(@"MobileGestalt", nil),
                 NSLocalizedString(@"MobileGestalt is not loaded. The read failed; check the log and retry.", nil));
         return;
     }
     self.mg[@"CacheExtra"] = self.cacheExtra;
+    NSUInteger generation = self.changeGeneration;
+    self.applying = YES;
+    self.applyButton.enabled = NO;
     BQBusyView *busy = [BQBusyView showInView:self.view text:NSLocalizedString(@"Writing MobileGestalt...", nil)];
-    NSDictionary *snapshot = [self.mg copy];
+    NSMutableDictionary *snapshot = [self.mg mutableCopy];
+    snapshot[@"CacheExtra"] = [self.cacheExtra copy];
     dispatch_async(BQWorkQueue(), ^{
         NSString *err = nil;
         BOOL ok = BQSaveGestalt(snapshot, &err);
         dispatch_async(dispatch_get_main_queue(), ^{
             [busy hide];
+            self.applying = NO;
+            self.applyButton.enabled = self.hasPendingChanges;
             if (!ok) { BQAlert(self, NSLocalizedString(@"Apply failed", nil), err ?: NSLocalizedString(@"unknown error", nil)); return; }
             UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Applied", nil)
                                                                        message:NSLocalizedString(@"MobileGestalt written. Respring to apply the changes.", nil)
@@ -659,7 +714,10 @@ static NSString *BQValueSummary(id v) {
                 BQRespring();
             }]];
             [self presentViewController:a animated:YES completion:nil];
-            self.hasPendingChanges = NO;
+            if (self.changeGeneration == generation) {
+                self.hasPendingChanges = NO;
+                self.applyButton.enabled = NO;
+            }
         });
     });
 }
@@ -677,7 +735,8 @@ static NSString *BQValueSummary(id v) {
                 self.cacheExtra = nil;
                 self.keys = @[];
                 self.hasPendingChanges = NO;
-                self.navigationItem.rightBarButtonItems.firstObject.enabled = NO;
+                self.changeGeneration++;
+                self.applyButton.enabled = NO;
                 [self.tableView reloadData];
                 UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Reverted", nil)
                                                                            message:NSLocalizedString(@"Original MobileGestalt restored. Respring or reboot.", nil)
@@ -697,7 +756,7 @@ static NSString *BQValueSummary(id v) {
 - (void)addKey {
     CacheExtraEditVC *vc = [[CacheExtraEditVC alloc] initWithKey:nil value:nil isNew:YES onSave:^(NSString *key, id value) {
         self.cacheExtra[key] = value;
-        self.hasPendingChanges = YES;
+        [self markPendingChanges];
         [self synchronizeCacheExtra];
     } onDelete:nil];
     [self.navigationController pushViewController:vc animated:YES];
@@ -709,13 +768,12 @@ static NSString *BQValueSummary(id v) {
     id value = self.cacheExtra[key];
     CacheExtraEditVC *vc = [[CacheExtraEditVC alloc] initWithKey:key value:value isNew:NO onSave:^(NSString *k, id v) {
         self.cacheExtra[k] = v;
-        self.hasPendingChanges = YES;
+        [self markPendingChanges];
         [self.tableView reloadData];
     } onDelete:^(NSString *k) {
         [self.cacheExtra removeObjectForKey:k];
-        self.hasPendingChanges = YES;
-        self.keys = [self.cacheExtra.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-        [self.tableView reloadData];
+        [self markPendingChanges];
+        [self synchronizeCacheExtra];
     }];
     [self.navigationController pushViewController:vc animated:YES];
 }
@@ -903,7 +961,7 @@ static NSString *BQValueSummary(id v) {
         NSString *key = self.keys[indexPath.row];
         [self.cacheExtra removeObjectForKey:key];
         [self synchronizeCacheExtra];
-        self.hasPendingChanges = YES;
+        [self markPendingChanges];
         BQLog(@"removed CacheExtra key %@ (in memory)", key);
         done(YES);
     }];

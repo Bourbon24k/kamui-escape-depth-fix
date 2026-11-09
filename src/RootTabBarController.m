@@ -21,9 +21,9 @@
         };
 
     self.viewControllers = @[
-        nav([[GestaltVC alloc] init], NSLocalizedString(@"Gestalt", nil), @"slider.horizontal.3"),
-        nav([[PosterBoardVC alloc] init], NSLocalizedString(@"PosterBoard", nil), @"photo.on.rectangle"),
-        nav([[SettingsVC alloc] init], NSLocalizedString(@"Settings", nil), @"gearshape"),
+        nav([[GestaltVC alloc] init], @"Gestalt", @"slider.horizontal.3"),
+        nav([[PosterBoardVC alloc] init], @"PosterBoard", @"photo.on.rectangle"),
+        nav([[SettingsVC alloc] init], @"Settings", @"gearshape"),
     ];
     self.selectedIndex = 0;
 }

@@ -1,3 +1,99 @@
+# KAMUI 2.4.16 — fix Explore filter contrast
+
+## What's new in 2.4.16
+
+- Add Explore source filters for Cowabunga, CAPlayground, or both catalogs, plus an Apple wallpaper filter for Cowabunga.
+- Fix selected Explore filter labels disappearing in dark mode by using dynamic system colors and explicit label contrast.
+- Retain the 2.4.15 safeguards for Gestalt value types, wallpaper archive sizes, bounded logs, and MCM symbol checks.
+
+## Build details
+
+- App version: `2.4.16`
+- Build: `2416`
+- IPA: `build/KAMUI-2.4.16.ipa`
+
+---
+
+# KAMUI 2.4.15 — harden value handling and imports
+
+## What's new in 2.4.15
+
+- Safely render Gestalt switches when CacheExtra values have unexpected plist types.
+- Reject oversized wallpaper archives and ZIP entries to avoid excessive memory use during import.
+- Keep the diagnostic log bounded by rotating it after 2 MB.
+- Check required MCM symbols before attempting sandbox queries.
+
+## Build details
+
+- App version: `2.4.15`
+- Build: `2415`
+- IPA: `build/KAMUI-2.4.15.ipa`
+
+---
+
+# KAMUI 2.4.14 — stable Gestalt key sorting
+
+## What's new in 2.4.14
+
+- Replace selector-based MobileGestalt key sorting with CoreFoundation comparison to prevent the `localizedCaseInsensitiveCompare` crash.
+- Keep non-string dictionary keys out of the displayed key list.
+
+## Build details
+
+- App version: `2.4.14`
+- Build: `2414`
+- IPA: `build/KAMUI-2.4.14.ipa`
+
+---
+
+# KAMUI 2.4.13 — avoid selector-based Gestalt key sorting
+
+## What's new in 2.4.13
+
+- Sort MobileGestalt keys with CoreFoundation string comparison instead of dynamically dispatching `localizedCaseInsensitiveCompare:`.
+- Keep non-string dictionary keys out of the displayed key list.
+
+## Build details
+
+- App version: `2.4.13`
+- Build: `2413`
+- IPA: `build/KAMUI-2.4.13.ipa`
+
+---
+
+# KAMUI 2.4.12 — filter invalid wallpaper entries
+
+## What's new in 2.4.12
+
+- Skip macOS `.DS_Store` files and other non-descriptor entries when importing wallpaper packs, preventing junk entries from being written into PosterBoard.
+- Validate descriptor folders before applying them.
+- Reset PosterBoard once after installing this update to remove invalid entries written by older builds.
+
+## Build details
+
+- App version: `2.4.12`
+- Build: `2412`
+- IPA: `build/KAMUI-2.4.12.ipa`
+
+---
+
+# KAMUI 2.4.11 — restored Gestalt tools and settings
+
+## What's new in 2.4.11
+
+- Restored advanced Gestalt controls for version and AI device spoofing, Apple Intelligence, Siri region, experimental iPadOS mode, ResearchFuse, and Store Demo Mode. Risky changes require confirmation.
+- Restored language selection for English, Russian, Korean, Arabic, Turkish, Ukrainian, and Vietnamese, plus the optional in-app test-device banner and editable group label.
+- Preserved the current Gestalt backup validation, pending-edit protection, Dynamic Island handling, and PosterBoard workflow.
+- Left the unsupported class-2 sandbox fallback out of Settings.
+
+## Build details
+
+- App version: `2.4.11`
+- Build: `2411`
+- IPA: `build/KAMUI-2.4.11.ipa`
+
+---
+
 # KAMUI 2.4.3 — iOS 27.0.1–27.2 sandbox escape + MobileGestalt editor
 
 **Open source, MIT licensed and free for everyone.** There is no tester list,
