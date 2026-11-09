@@ -1,3 +1,24 @@
+# KAMUI 2.5.0 — safer wallpaper imports and diagnostics
+
+## What's new in 2.5.0
+
+- Make wallpaper imports transactional: stage descriptor writes, verify installed descriptors, and keep rollback copies for both descriptor and full-container imports until the copy completes.
+- Ignore macOS archive metadata such as `.DS_Store` and `._*` files during wallpaper extraction.
+- Add sanitized log sharing from the Log screen for easier troubleshooting.
+- Show per-preset iOS requirements and whether the current device/version has been verified.
+- Keep wallpaper search and catalog filters fixed while browsing the Explore list.
+- Apply the selected app language immediately, independent of the system language.
+- Add the new KAMUI layered-panels app icon.
+- Bump the app version to `2.5.0` (build `2500`).
+
+## Build
+
+- App version: `2.5.0`
+- Build: `2500`
+- IPA: `build/KAMUI-2.5.0.ipa`
+
+---
+
 # KAMUI 2.4.16 — fix Explore filter contrast
 
 ## What's new in 2.4.16

@@ -139,6 +139,11 @@
 "Save" = "Save";
 "Save failed" = "Save failed";
 "Search wallpapers" = "Search wallpapers";
+"Custom" = "Custom";
+"Apple" = "Apple";
+"Show all wallpapers" = "Show all wallpapers";
+"Show favorites" = "Show favorites";
+"Refresh catalog" = "Refresh catalog";
 "Security Research Device" = "Security Research Device";
 "Sets ArtworkDeviceSubType and enables Dynamic Island. 17/18 values are experimental; use a custom subtype if the island position is wrong." = "Sets ArtworkDeviceSubType and enables Dynamic Island. 17/18 values are experimental; use a custom subtype if the island position is wrong.";
 "Sets ResearchFuse. iOS will treat this iPhone as a research-fused test device. This is cosmetic on most builds but can affect services and is high risk." = "Sets ResearchFuse. iOS will treat this iPhone as a research-fused test device. This is cosmetic on most builds but can affect services and is high risk.";
@@ -189,3 +194,8 @@
 "true / false" = "true / false";
 "unknown" = "unknown";
 "unknown error" = "unknown error";
+"Requires iOS %ld or later" = "Requires iOS %ld or later";
+"Verified on this device and iOS version" = "Verified on this device and iOS version";
+"Not verified on %@ · iOS %ld" = "Not verified on %@ · iOS %ld";
+"Device compatibility not verified · iOS %ld" = "Device compatibility not verified · iOS %ld";
+"Share" = "Share";

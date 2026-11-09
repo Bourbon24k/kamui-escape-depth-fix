@@ -97,6 +97,11 @@
 "Descriptors removed. Respring to apply." = "Tanımlayıcılar kaldırıldı. SpringBoard'u yeniden başlatın.";
 "Open failed" = "Açma başarısız";
 "Search wallpapers" = "Duvar kağıdı ara";
+"Custom" = "Özel";
+"Apple" = "Apple";
+"Show all wallpapers" = "Tüm duvar kâğıtları";
+"Show favorites" = "Favorileri göster";
+"Refresh catalog" = "Kataloğu yenile";
 "Apply now" = "Şimdi uygula";
 "Applying wallpaper..." = "Duvar kağıdı uygulanıyor...";
 "Downloaded" = "İndirildi";

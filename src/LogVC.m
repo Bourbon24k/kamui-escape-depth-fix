@@ -25,6 +25,11 @@
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh
                                                                                            target:self
                                                                                            action:@selector(loadLog)];
+    UIBarButtonItem *share = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Share", nil)
+                                                              style:UIBarButtonItemStylePlain
+                                                             target:self
+                                                             action:@selector(shareLog)];
+    self.navigationItem.rightBarButtonItems = @[share, self.navigationItem.rightBarButtonItem];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:self
@@ -51,6 +56,32 @@
         [[NSFileManager defaultManager] createFileAtPath:BQLogPath() contents:nil attributes:nil];
         [self loadLog];
     });
+}
+
+- (NSString *)sanitizedLogText:(NSString *)text {
+    NSArray<NSArray<NSString *> *> *replacements = @[
+        @[@"[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}", @"[UUID]"],
+        @[@"/Users/[^/\\s]+", @"/Users/[REDACTED]"],
+        @[@"group\\.[A-Za-z0-9._-]+", @"[APP_GROUP]"],
+        @[@"0x[0-9A-Fa-f]{8,}", @"[ADDRESS]"],
+    ];
+    NSString *result = text ?: @"";
+    for (NSArray<NSString *> *replacement in replacements) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:replacement[0] options:0 error:nil];
+        result = [regex stringByReplacingMatchesInString:result
+                                                 options:0
+                                                   range:NSMakeRange(0, result.length)
+                                            withTemplate:replacement[1]];
+    }
+    return result;
+}
+
+- (void)shareLog {
+    NSString *text = [self sanitizedLogText:self.textView.text];
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[text]
+                                                                         applicationActivities:nil];
+    share.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.firstObject;
+    [self presentViewController:share animated:YES completion:nil];
 }
 
 @end

@@ -2,6 +2,7 @@
 #import "GestaltVC.h"
 #import "PosterBoardVC.h"
 #import "SettingsVC.h"
+#import "BQUI.h"
 
 @implementation RootTabBarController
 
@@ -21,9 +22,9 @@
         };
 
     self.viewControllers = @[
-        nav([[GestaltVC alloc] init], @"Gestalt", @"slider.horizontal.3"),
+        nav([[GestaltVC alloc] init], NSLocalizedString(@"MobileGestalt", nil), @"slider.horizontal.3"),
         nav([[PosterBoardVC alloc] init], @"PosterBoard", @"photo.on.rectangle"),
-        nav([[SettingsVC alloc] init], @"Settings", @"gearshape"),
+        nav([[SettingsVC alloc] init], NSLocalizedString(@"Settings", nil), @"gearshape"),
     ];
     self.selectedIndex = 0;
 }

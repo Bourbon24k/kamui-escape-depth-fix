@@ -97,6 +97,11 @@
 "Descriptors removed. Respring to apply." = "설명자가 제거되었습니다. SpringBoard를 재시작하세요.";
 "Open failed" = "열기 실패";
 "Search wallpapers" = "배경화면 검색";
+"Custom" = "사용자 지정";
+"Apple" = "Apple";
+"Show all wallpapers" = "모든 배경화면";
+"Show favorites" = "즐겨찾기 표시";
+"Refresh catalog" = "카탈로그 새로고침";
 "Apply now" = "지금 적용";
 "Applying wallpaper..." = "배경화면 적용 중...";
 "Downloaded" = "다운로드됨";

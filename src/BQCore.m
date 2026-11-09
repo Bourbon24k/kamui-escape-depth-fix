@@ -711,7 +711,10 @@ static BOOL bq_zip_path_ok(NSString *name, NSString **cleanOut) {
     for (NSString *c in [clean componentsSeparatedByString:@"/"]) {
         if ([c isEqualToString:@".."] || [c isEqualToString:@"."]) return NO;
     }
-    if ([clean isEqualToString:@"__MACOSX"] || [clean hasPrefix:@"__MACOSX/"]) return NO;
+    for (NSString *component in [clean componentsSeparatedByString:@"/"]) {
+        if ([component isEqualToString:@"__MACOSX"] || [component isEqualToString:@".DS_Store"] ||
+            [component isEqualToString:@".AppleDouble"] || [component hasPrefix:@"._"]) return NO;
+    }
     if (cleanOut) *cleanOut = clean;
     return YES;
 }
@@ -978,35 +981,106 @@ static BOOL bq_ensure_pb_descriptors(NSString *container, NSString *ext, NSStrin
     return ok;
 }
 
-static BOOL bq_overlay_directory(NSString *source, NSString *destination, NSError **error) {
+static BOOL bq_overlay_directory_recursive(NSString *source, NSString *destination, NSString *backupRoot,
+                                           NSMutableArray<NSDictionary *> *journal, NSUInteger *backupIndex,
+                                           BOOL *rollbackIncomplete, NSError **error) {
     NSFileManager *fm = [NSFileManager defaultManager];
-    BOOL isDirectory = NO;
-    if (![fm fileExistsAtPath:source isDirectory:&isDirectory] || !isDirectory) {
+    BOOL sourceIsDirectory = NO;
+    if (![fm fileExistsAtPath:source isDirectory:&sourceIsDirectory] || !sourceIsDirectory) {
         if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
         return NO;
     }
+
     BOOL destinationIsDirectory = NO;
-    if ([fm fileExistsAtPath:destination isDirectory:&destinationIsDirectory] && !destinationIsDirectory) {
-        if (![fm removeItemAtPath:destination error:error]) return NO;
+    BOOL destinationExists = [fm fileExistsAtPath:destination isDirectory:&destinationIsDirectory];
+    if (destinationExists && !destinationIsDirectory) {
+        NSString *backup = [backupRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%lu", (unsigned long)(*backupIndex)++]];
+        if (![fm moveItemAtPath:destination toPath:backup error:error]) return NO;
+        [journal addObject:@{@"kind": @"file", @"path": destination, @"backup": backup}];
+        destinationExists = NO;
     }
-    if (![fm createDirectoryAtPath:destination withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+    if (!destinationExists) {
+        if (![fm createDirectoryAtPath:destination withIntermediateDirectories:NO attributes:nil error:error]) return NO;
+        [journal addObject:@{@"kind": @"directory", @"path": destination}];
+    }
+
     NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:source error:error];
     if (!children) return NO;
     for (NSString *child in children) {
+        if ([child isEqualToString:@".DS_Store"] || [child hasPrefix:@"._"] ||
+            [child isEqualToString:@"__MACOSX"] || [child isEqualToString:@".AppleDouble"]) continue;
         NSString *src = [source stringByAppendingPathComponent:child];
         NSString *dst = [destination stringByAppendingPathComponent:child];
         BOOL childIsDirectory = NO;
         if (![fm fileExistsAtPath:src isDirectory:&childIsDirectory]) continue;
         if (childIsDirectory) {
-            if (!bq_overlay_directory(src, dst, error)) return NO;
-        } else {
-            BOOL dstIsDirectory = NO;
-            if ([fm fileExistsAtPath:dst isDirectory:&dstIsDirectory] &&
-                (dstIsDirectory || ![fm removeItemAtPath:dst error:error])) return NO;
-            if (![fm copyItemAtPath:src toPath:dst error:error]) return NO;
+            if (!bq_overlay_directory_recursive(src, dst, backupRoot, journal, backupIndex, rollbackIncomplete, error)) return NO;
+            continue;
         }
+
+        NSString *backup = nil;
+        if ([fm fileExistsAtPath:dst]) {
+            backup = [backupRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%lu", (unsigned long)(*backupIndex)++]];
+            if (![fm moveItemAtPath:dst toPath:backup error:error]) return NO;
+        }
+        NSString *staged = [dst stringByAppendingFormat:@".bq-stage-%@", NSUUID.UUID.UUIDString];
+        if (![fm copyItemAtPath:src toPath:staged error:error] || ![fm moveItemAtPath:staged toPath:dst error:error]) {
+            [fm removeItemAtPath:staged error:nil];
+            if (backup && ![fm moveItemAtPath:backup toPath:dst error:nil]) {
+                *rollbackIncomplete = YES;
+                BQLog(@"container overlay: immediate restore failed for %@", dst);
+            }
+            return NO;
+        }
+        NSMutableDictionary *entry = [@{@"kind": @"file", @"path": dst} mutableCopy];
+        if (backup) entry[@"backup"] = backup;
+        [journal addObject:entry];
     }
     return YES;
+}
+
+static BOOL bq_overlay_directory(NSString *source, NSString *destination, NSError **error) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL sourceIsDirectory = NO;
+    if (![fm fileExistsAtPath:source isDirectory:&sourceIsDirectory] || !sourceIsDirectory) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+        return NO;
+    }
+
+    NSString *backupRoot = [destination stringByAppendingPathComponent:
+                            [NSString stringWithFormat:@".bq-tendies-backup-%@", NSUUID.UUID.UUIDString]];
+    if (![fm createDirectoryAtPath:backupRoot withIntermediateDirectories:NO attributes:nil error:error]) return NO;
+    NSMutableArray<NSDictionary *> *journal = [NSMutableArray array];
+    NSUInteger backupIndex = 0;
+    BOOL rollbackIncomplete = NO;
+    BOOL ok = bq_overlay_directory_recursive(source, destination, backupRoot, journal, &backupIndex, &rollbackIncomplete, error);
+    if (!ok) {
+        for (NSDictionary *entry in journal.reverseObjectEnumerator) {
+            NSString *path = entry[@"path"];
+            if ([entry[@"kind"] isEqualToString:@"directory"]) {
+                NSError *removeError = nil;
+                if ([fm fileExistsAtPath:path] && ![fm removeItemAtPath:path error:&removeError]) {
+                    rollbackIncomplete = YES;
+                    BQLog(@"container overlay rollback: remove %@ failed: %@", path, removeError.localizedDescription ?: @"unknown error");
+                }
+            } else {
+                [fm removeItemAtPath:path error:nil];
+                NSString *backup = entry[@"backup"];
+                if (backup && ![fm moveItemAtPath:backup toPath:path error:nil]) {
+                    rollbackIncomplete = YES;
+                    BQLog(@"container overlay rollback: restore %@ failed", path);
+                }
+            }
+        }
+    }
+    if (ok || !rollbackIncomplete) {
+        [fm removeItemAtPath:backupRoot error:nil];
+    } else if (error) {
+        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteUnknownError
+                                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                                     @"Overlay failed; rollback was incomplete and recovery files were retained: %@", backupRoot]}];
+    }
+    return ok;
 }
 
 static BOOL bq_write_pb_refresh_prefs(NSString *container) {
@@ -1047,6 +1121,122 @@ static BOOL bq_write_pb_refresh_prefs(NSString *container) {
           writeError.localizedDescription ?: dirError.localizedDescription ?: serializeError.localizedDescription ?: @"-");
     BQEndEscape(h);
     return ok;
+}
+
+static NSString *bq_descriptor_target(NSString *container, NSString *ext) {
+    return [container stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"Library/Application Support/PRBPosterExtensionDataStore/%@/Extensions/%@/descriptors",
+             kPBExtVersion, ext]];
+}
+
+static NSDictionary *bq_install_descriptor(NSString *folder, NSString *container, NSString *ext,
+                                           NSString *destName, NSString **err) {
+    NSString *target = bq_descriptor_target(container, ext);
+    NSString *link = nil;
+    int64_t handle = BQEscape(target, &link);
+    if (handle < 0) {
+        if (err) *err = [NSString stringWithFormat:@"escape to %@ failed (%lld)", ext, (long long)handle];
+        return nil;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *destination = [link stringByAppendingPathComponent:destName];
+    NSString *staged = [link stringByAppendingPathComponent:[NSString stringWithFormat:@".bq-stage-%@", NSUUID.UUID.UUIDString]];
+    NSString *backupName = nil;
+    NSString *backup = nil;
+    NSError *copyError = nil;
+    BOOL ok = [fm copyItemAtPath:folder toPath:staged error:&copyError];
+    if (!ok) {
+        if (err) *err = [NSString stringWithFormat:@"staging descriptor failed: %@", copyError.localizedDescription ?: @"copy error"];
+    } else {
+        if ([fm fileExistsAtPath:destination]) {
+            backupName = [NSString stringWithFormat:@".bq-backup-%@", NSUUID.UUID.UUIDString];
+            backup = [link stringByAppendingPathComponent:backupName];
+            ok = [fm moveItemAtPath:destination toPath:backup error:&copyError];
+            if (!ok && err) *err = [NSString stringWithFormat:@"could not preserve existing descriptor: %@", copyError.localizedDescription ?: @"move error"];
+        }
+        if (ok) {
+            ok = [fm moveItemAtPath:staged toPath:destination error:&copyError];
+            if (ok && !bq_is_descriptor(destination)) {
+                ok = NO;
+                copyError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadCorruptFileError
+                                             userInfo:@{NSLocalizedDescriptionKey: @"installed folder is missing the PosterBoard descriptor identifier"}];
+                [fm removeItemAtPath:destination error:nil];
+            }
+            if (!ok) {
+                [fm removeItemAtPath:staged error:nil];
+                NSError *restoreError = nil;
+                BOOL restored = !backup || [fm moveItemAtPath:backup toPath:destination error:&restoreError];
+                if (!restored) BQLog(@"apply: failed to restore replaced descriptor %@: %@", destName, restoreError.localizedDescription ?: @"unknown error");
+                if (err) *err = restored
+                    ? [NSString stringWithFormat:@"installing descriptor failed: %@", copyError.localizedDescription ?: @"move error"]
+                    : [NSString stringWithFormat:@"installing descriptor failed and its previous copy could not be restored (backup %@): %@",
+                       backupName, restoreError.localizedDescription ?: @"unknown error"];
+            }
+        } else {
+            [fm removeItemAtPath:staged error:nil];
+        }
+    }
+    if (!ok) [fm removeItemAtPath:staged error:nil];
+    BQEndEscape(handle);
+    if (!ok) return nil;
+
+    NSMutableDictionary *record = [@{@"target": target, @"name": destName} mutableCopy];
+    if (backupName) record[@"backup"] = backupName;
+    return record;
+}
+
+static BOOL bq_rollback_descriptors(NSArray<NSDictionary *> *records) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL complete = YES;
+    for (NSDictionary *record in records.reverseObjectEnumerator) {
+        NSString *link = nil;
+        int64_t handle = BQEscape(record[@"target"], &link);
+        if (handle < 0) {
+            BQLog(@"apply rollback: escape failed for %@ (%lld)", record[@"target"], (long long)handle);
+            complete = NO;
+            continue;
+        }
+        NSString *destination = [link stringByAppendingPathComponent:record[@"name"]];
+        NSError *removeError = nil;
+        if ([fm fileExistsAtPath:destination] && ![fm removeItemAtPath:destination error:&removeError]) {
+            BQLog(@"apply rollback: remove %@ failed: %@", record[@"name"], removeError.localizedDescription ?: @"unknown error");
+            complete = NO;
+        }
+        NSString *backupName = record[@"backup"];
+        if (backupName) {
+            NSString *backup = [link stringByAppendingPathComponent:backupName];
+            NSError *restoreError = nil;
+            if (![fm fileExistsAtPath:backup]) {
+                BQLog(@"apply rollback: backup %@ is missing", backupName);
+                complete = NO;
+            } else if (![fm moveItemAtPath:backup toPath:destination error:&restoreError]) {
+                BQLog(@"apply rollback: restore %@ failed: %@", record[@"name"], restoreError.localizedDescription ?: @"unknown error");
+                complete = NO;
+            }
+        }
+        BQEndEscape(handle);
+    }
+    return complete;
+}
+
+static void bq_finalize_descriptor_backups(NSArray<NSDictionary *> *records) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSDictionary *record in records) {
+        NSString *backupName = record[@"backup"];
+        if (!backupName) continue;
+        NSString *link = nil;
+        int64_t handle = BQEscape(record[@"target"], &link);
+        if (handle < 0) {
+            BQLog(@"apply: unable to remove descriptor backup %@ (%lld)", backupName, (long long)handle);
+            continue;
+        }
+        NSError *removeError = nil;
+        if (![fm removeItemAtPath:[link stringByAppendingPathComponent:backupName] error:&removeError]) {
+            BQLog(@"apply: descriptor backup cleanup failed %@: %@", backupName, removeError.localizedDescription ?: @"unknown error");
+        }
+        BQEndEscape(handle);
+    }
 }
 
 BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
@@ -1131,7 +1321,8 @@ BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
         return NO;
     }
 
-    int written = 0;
+    NSMutableArray<NSDictionary *> *installed = [NSMutableArray array];
+    NSString *installFailure = nil;
     for (NSString *folder in folders) {
         // Determine provider from the path inside the archive.
         NSString *ext = kPBCollections;
@@ -1143,43 +1334,43 @@ BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
         BOOL preserveIDs = [folder containsString:@"/container/"];
         if (!preserveIDs) bq_randomize_descriptor(folder);
         NSString *destName = preserveIDs ? folder.lastPathComponent : NSUUID.UUID.UUIDString;
-        NSArray<NSString *> *targets = @[ext];
-        BOOL wroteOne = NO;
-        for (NSString *targetExt in targets) {
-            NSString *ensureError = nil;
-            if (!bq_ensure_pb_descriptors(container, targetExt, &ensureError)) {
-                BQLog(@"apply: ensure %@ failed: %@", targetExt, ensureError ?: @"unknown error");
-                continue;
-            }
-            NSString *target = [container stringByAppendingPathComponent:
-                [NSString stringWithFormat:@"Library/Application Support/PRBPosterExtensionDataStore/%@/Extensions/%@/descriptors",
-                 kPBExtVersion, targetExt]];
-            NSString *link = nil;
-            int64_t h = BQEscape(target, &link);
-            if (h < 0) {
-                BQLog(@"apply: escape to %@ failed (%lld)", targetExt, (long long)h);
-                continue;
-            }
-            NSString *dest = [link stringByAppendingPathComponent:destName];
-            if (preserveIDs) [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
-            NSError *e = nil;
-            if ([[NSFileManager defaultManager] copyItemAtPath:folder toPath:dest error:&e]) {
-                wroteOne = YES;
-                BQLog(@"apply: %@ -> %@", folder.lastPathComponent, targetExt);
-            } else {
-                BQLog(@"apply: copy %@ -> %@ failed: %@", folder, targetExt, e);
-            }
-            BQEndEscape(h);
+        NSString *ensureError = nil;
+        if (!bq_ensure_pb_descriptors(container, ext, &ensureError)) {
+            installFailure = [NSString stringWithFormat:@"Could not prepare %@ descriptors: %@", ext, ensureError ?: @"unknown error"];
+            BQLog(@"apply: ensure %@ failed: %@", ext, ensureError ?: @"unknown error");
+            break;
         }
-        if (wroteOne) written++;
+        NSString *copyError = nil;
+        NSDictionary *record = bq_install_descriptor(folder, container, ext, destName, &copyError);
+        if (!record) {
+            installFailure = copyError ?: [NSString stringWithFormat:@"Could not install %@", folder.lastPathComponent];
+            BQLog(@"apply: install %@ failed: %@", folder.lastPathComponent, installFailure);
+            break;
+        }
+        [installed addObject:record];
+        BQLog(@"apply: %@ -> %@", folder.lastPathComponent, ext);
     }
-    if (written) bq_write_pb_refresh_prefs(container);
-    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-    if (count) *count = written;
-    if (written == 0) {
-        if (err) *err = @"no descriptors were written";
+
+    if (installFailure) {
+        BOOL rolledBack = bq_rollback_descriptors(installed);
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+        if (err) *err = rolledBack
+            ? [NSString stringWithFormat:@"Wallpaper import failed; rolled back %lu descriptor(s): %@", (unsigned long)installed.count, installFailure]
+            : [NSString stringWithFormat:@"Wallpaper import failed and rollback was incomplete; run Reset PosterBoard before retrying: %@", installFailure];
         return NO;
     }
+
+    if (![installed count] || !bq_write_pb_refresh_prefs(container)) {
+        BOOL rolledBack = bq_rollback_descriptors(installed);
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+        if (err) *err = !installed.count ? @"No descriptors were written" :
+            (rolledBack ? @"Could not refresh PosterBoard preferences; imported descriptors were rolled back" :
+             @"Could not refresh PosterBoard preferences and rollback was incomplete; run Reset PosterBoard before retrying");
+        return NO;
+    }
+    bq_finalize_descriptor_backups(installed);
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+    if (count) *count = (int)installed.count;
     return YES;
 }
 
