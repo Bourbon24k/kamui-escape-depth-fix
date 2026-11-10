@@ -12,7 +12,7 @@ if [ -z "${SDK:-}" ]; then
     fi
 fi
 APP_NAME="BQTool"
-VERSION="2.5.1"
+VERSION="2.5.2"
 BID="${BID:-com.kamui.escape}"
 BUILD="$ROOT/build"
 APP="$BUILD/Payload/$APP_NAME.app"

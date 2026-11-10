@@ -52,7 +52,7 @@
 }
 
 - (void)clearLog {
-    BQConfirm(self, @"Clear log?", @"Truncate bqtool.log.", ^{
+    BQConfirm(self, NSLocalizedString(@"Clear log?", nil), NSLocalizedString(@"Truncate bqtool.log.", nil), ^{
         [[NSFileManager defaultManager] createFileAtPath:BQLogPath() contents:nil attributes:nil];
         [self loadLog];
     });

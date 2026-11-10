@@ -1,4 +1,5 @@
 #import "BQCore.h"
+#import "BQUI.h"
 #import <dlfcn.h>
 #import <zlib.h>
 #import <CoreFoundation/CoreFoundation.h>
@@ -98,13 +99,25 @@ NSString *BQGroupID(void) {
                 CFTypeRef val = copy(task, CFSTR("com.apple.security.application-groups"), NULL);
                 if (val && CFGetTypeID(val) == CFArrayGetTypeID()) {
                     CFArrayRef arr = (CFArrayRef)val;
+                    NSString *firstGroup = nil;
                     for (CFIndex i = 0; i < CFArrayGetCount(arr); i++) {
                         CFTypeRef x = CFArrayGetValueAtIndex(arr, i);
                         if (x && CFGetTypeID(x) == CFStringGetTypeID()) {
-                            gGroupID = [(__bridge NSString *)x copy];
-                            break;
+                            NSString *candidate = (__bridge NSString *)x;
+                            if (!firstGroup) firstGroup = [candidate copy];
+                            NSURL *container = [[NSFileManager defaultManager]
+                                containerURLForSecurityApplicationGroupIdentifier:candidate];
+                            if (container.path.length) {
+                                gGroupID = [candidate copy];
+                                gGroupRoot = [container.path copy];
+                                break;
+                            }
                         }
                     }
+                    // Keep the entitlement value as a fallback; some signing
+                    // setups return a usable MCM group before Foundation can
+                    // resolve its container URL.
+                    if (!gGroupID) gGroupID = firstGroup;
                 }
                 if (val) CFRelease(val);
                 CFRelease(task);
@@ -391,7 +404,15 @@ static int64_t bq_escape_symlink(NSString *target, NSString **linkOut) {
         return -2;
     }
     NSString *path = nil;
-    int64_t h = bq_query_escape(7, gid, YES, 3, @"", 0x8100000000ULL, @"class7-symlink", &path);
+    // ContainerManager uses a different operation flag for App Group paths on
+    // iOS 26. Keep the iOS 27 flag for other targets and for newer releases.
+    NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
+    BOOL isIOS26AppGroup = os.majorVersion == 26 &&
+        [target containsString:@"/var/mobile/Containers/Shared/AppGroup"];
+    uint64_t flags = isIOS26AppGroup ? 0x800000000ULL : 0x8100000000ULL;
+    BQLog(@"class7 operation flags=0x%llx os=%@ appGroupTarget=%d",
+          (unsigned long long)flags, [UIDevice currentDevice].systemVersion, isIOS26AppGroup);
+    int64_t h = bq_query_escape(7, gid, YES, 3, @"", flags, @"class7-symlink", &path);
     if (h >= 0) {
         if (linkOut) *linkOut = caches;
         return h;
@@ -748,7 +769,7 @@ BOOL BQCheckAccess(NSString *target, BOOL writable, NSString **err) {
     NSString *link = nil;
     int64_t h = BQEscape(target, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape failed (%lld)", nil), (long long)h];
         return NO;
     }
     BOOL ok = NO;
@@ -1036,6 +1057,8 @@ NSString *BQFindPosterBoardContainer(NSString **err) {
 
     NSArray *roots = @[
         @"/var/mobile/Containers/Data/Application",
+        // Some iOS 27 builds keep system app containers under this root.
+        @"/var/containers/Data/System",
         @"/var/mobile/Containers/Data/InternalDaemon",
         @"/var/mobile/Containers/Data/PluginKitPlugin",
     ];
@@ -1555,39 +1578,90 @@ static BOOL bq_write_all(int fd, const uint8_t *buf, size_t len) {
     return YES;
 }
 
+static BOOL bq_write_in_place(NSString *path, NSData *data, NSData *original, NSString **err) {
+    if (!original.length) {
+        if (err) *err = NSLocalizedString(@"in-place write refused because the original file is unavailable", nil);
+        return NO;
+    }
+    int fd = open(path.fileSystemRepresentation, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        int savedErrno = errno;
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"in-place open failed (%s)", nil), strerror(savedErrno)];
+        return NO;
+    }
+    BOOL ok = (ftruncate(fd, 0) == 0) &&
+              bq_write_all(fd, data.bytes, data.length) &&
+              (fsync(fd) == 0);
+    int writeErrno = errno ? errno : EIO;
+    if (!ok && original.length) {
+        BOOL restored = (ftruncate(fd, 0) == 0) &&
+                        (lseek(fd, 0, SEEK_SET) >= 0) &&
+                        bq_write_all(fd, original.bytes, original.length) &&
+                        (fsync(fd) == 0);
+        BQLog(@"in-place write failed; original rollback=%@", restored ? @"OK" : @"FAILED");
+    }
+    close(fd);
+    if (!ok && err) *err = [NSString stringWithFormat:NSLocalizedString(@"in-place write failed (%s)", nil), strerror(writeErrno)];
+    return ok;
+}
+
 static BOOL bq_write_data(NSString *path, NSData *data, NSString **err) {
     NSData *original = [NSData dataWithContentsOfFile:path];
     if (BQInPlaceWrite()) {
-        int fd = open(path.fileSystemRepresentation, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
-        if (fd >= 0) {
-            BOOL ok = (ftruncate(fd, 0) == 0) &&
-                      bq_write_all(fd, data.bytes, data.length) &&
-                      (fsync(fd) == 0);
-            if (!ok && original.length) {
-                BQLog(@"in-place write failed; rolling back original (%lu bytes)", (unsigned long)original.length);
-                ftruncate(fd, 0);
-                lseek(fd, 0, SEEK_SET);
-                bq_write_all(fd, original.bytes, original.length);
-                fsync(fd);
-            }
-            close(fd);
-            if (ok) return YES;
-            BQLog(@"in-place write failed, falling back to atomic");
-        } else {
-            BQLog(@"in-place open failed: %s", strerror(errno));
-        }
+        NSString *inPlaceError = nil;
+        if (bq_write_in_place(path, data, original, &inPlaceError)) return YES;
+        BQLog(@"%@; falling back to atomic replacement", inPlaceError ?: @"in-place write failed");
     }
-    NSString *tmp = [path stringByAppendingString:@".bqtmp"];
-    if (![data writeToFile:tmp atomically:NO]) {
-        if (err) *err = @"temp write failed";
+
+    // A unique sibling avoids collisions with interrupted or concurrent saves.
+    NSString *tmp = [path stringByAppendingFormat:@".bqtmp-%@", NSUUID.UUID.UUIDString];
+    int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        int savedErrno = errno;
+        NSString *atomicError = [NSString stringWithFormat:NSLocalizedString(@"temporary file create failed at %@ (%s)", nil),
+                                 path.lastPathComponent, strerror(savedErrno)];
+        BQLog(@"%@", atomicError);
+        NSString *inPlaceError = nil;
+        if (original.length && bq_write_in_place(path, data, original, &inPlaceError)) {
+            BQLog(@"atomic temp creation failed; recovered with in-place write");
+            return YES;
+        }
+        if (err) *err = inPlaceError.length
+            ? [NSString stringWithFormat:NSLocalizedString(@"%@; fallback: %@", nil), atomicError, inPlaceError]
+            : atomicError;
         return NO;
     }
-    int fd = open(tmp.fileSystemRepresentation, O_RDONLY);
-    if (fd >= 0) { fsync(fd); close(fd); }
+    BOOL tempWritten = bq_write_all(fd, data.bytes, data.length) && fsync(fd) == 0;
+    int writeErrno = errno ? errno : EIO;
+    close(fd);
+    if (!tempWritten) {
+        unlink(tmp.fileSystemRepresentation);
+        NSString *atomicError = [NSString stringWithFormat:NSLocalizedString(@"temporary file write failed (%s)", nil), strerror(writeErrno)];
+        BQLog(@"%@", atomicError);
+        NSString *inPlaceError = nil;
+        if (original.length && bq_write_in_place(path, data, original, &inPlaceError)) {
+            BQLog(@"atomic temp write failed; recovered with in-place write");
+            return YES;
+        }
+        if (err) *err = inPlaceError.length
+            ? [NSString stringWithFormat:NSLocalizedString(@"%@; fallback: %@", nil), atomicError, inPlaceError]
+            : atomicError;
+        return NO;
+    }
     int r = rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation);
     if (r != 0) {
-        if (err) *err = [NSString stringWithFormat:@"rename failed: %s", strerror(errno)];
+        int savedErrno = errno;
         unlink(tmp.fileSystemRepresentation);
+        NSString *atomicError = [NSString stringWithFormat:NSLocalizedString(@"rename failed (%s)", nil), strerror(savedErrno)];
+        BQLog(@"%@", atomicError);
+        NSString *inPlaceError = nil;
+        if (original.length && bq_write_in_place(path, data, original, &inPlaceError)) {
+            BQLog(@"atomic rename failed; recovered with in-place write");
+            return YES;
+        }
+        if (err) *err = inPlaceError.length
+            ? [NSString stringWithFormat:NSLocalizedString(@"%@; fallback: %@", nil), atomicError, inPlaceError]
+            : atomicError;
         return NO;
     }
     return YES;
@@ -1597,7 +1671,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape to MobileGestalt failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape to MobileGestalt failed (%lld)", nil), (long long)h];
         return nil;
     }
     NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
@@ -1609,7 +1683,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
     }
     BQEndEscape(h);
     if (!dict) {
-        if (err) *err = @"MobileGestalt plist missing or invalid";
+        if (err) *err = NSLocalizedString(@"MobileGestalt plist missing or invalid", nil);
         return nil;
     }
     BQLog(@"MG loaded: %lu CacheExtra key(s), %lu byte(s)",
@@ -1619,7 +1693,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
 
 BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
     if (![dict isKindOfClass:[NSDictionary class]]) {
-        if (err) *err = @"invalid dictionary";
+        if (err) *err = NSLocalizedString(@"invalid dictionary", nil);
         return NO;
     }
     NSError *e = nil;
@@ -1627,13 +1701,13 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
                                                               format:NSPropertyListBinaryFormat_v1_0
                                                              options:0 error:&e];
     if (!data.length) {
-        if (err) *err = [NSString stringWithFormat:@"serialize failed: %@", e];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"serialize failed: %@", nil), e];
         return NO;
     }
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape to MobileGestalt failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape to MobileGestalt failed (%lld)", nil), (long long)h];
         return NO;
     }
     NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
@@ -1642,7 +1716,7 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
         NSMutableDictionary *check = [NSMutableDictionary dictionaryWithContentsOfFile:plist];
         if (!check) {
             ok = NO;
-            if (err) *err = @"post-write verification failed";
+            if (err) *err = NSLocalizedString(@"post-write verification failed", nil);
         } else {
             BQLog(@"MG saved: %lu bytes, %lu CacheExtra keys",
                   (unsigned long)data.length, (unsigned long)[check[@"CacheExtra"] count]);
@@ -1655,13 +1729,13 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
 BOOL BQRestoreGestalt(NSString **err) {
     NSData *backup = [NSData dataWithContentsOfFile:BQBackupPath()];
     if (!backup.length) {
-        if (err) *err = @"backup not found";
+        if (err) *err = NSLocalizedString(@"backup not found", nil);
         return NO;
     }
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape failed (%lld)", nil), (long long)h];
         return NO;
     }
     NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
