@@ -1,3 +1,4 @@
+#import "BQDepthFix.h"
 #import "BQCore.h"
 #import <dlfcn.h>
 #import <zlib.h>
@@ -1176,6 +1177,20 @@ BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
         return NO;
     }
     NSArray<NSString *> *folders = bq_find_descriptors(tmp);
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:BQDepthFixEnabledKey]) {
+        NSUInteger totalFixed = 0;
+        for (NSString *folder in folders) {
+            NSUInteger fixed = 0;
+            NSString *fixError = nil;
+            if (!BQDepthFixDescriptor(folder, &fixed, &fixError)) {
+                if (err) *err = [NSString stringWithFormat:@"Depth fix failed: %@", fixError ?: @"unknown error"];
+                [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+                return NO;
+            }
+            totalFixed += fixed;
+        }
+        BQLog(@"depth fix: %lu compatible floating layer(s) in %@", (unsigned long)totalFixed, url.lastPathComponent);
+    }
 
     // Container-format tendies preserve IDs and may contain PosterBoard files
     // outside the extension data store. Restore the whole container tree.

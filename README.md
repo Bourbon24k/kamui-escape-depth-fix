@@ -1,3 +1,28 @@
+# KAMUI Depth Fix — community fork
+
+This is an independent fork of [murk-sus/kamui-escape](https://github.com/murk-sus/kamui-escape), based on the upstream **v2.5.0** release. Upstream retains authorship and its MIT license; this fork is not an official KAMUI release.
+
+## Experimental depth-effect switch
+
+PosterBoard has an opt-in **Fix Depth Effect** switch (off by default). During an Apply operation, compatible `LayeredAnimation` wallpapers with an existing Floating `.ca` layer are modified in the temporary extracted copy. The imported `.tendies` file stays intact. The patch sets the family to `Clownfish`, prefixes the floating layer name with `Clownfish_`, and adds a rendering configuration only when none exists. Incompatible wallpapers are left as they are; malformed compatible entries abort that package before installation. Turning the switch off affects future applications, not previously installed posters.
+
+This is an experiment based on the separate [Tendies Depth Fix](https://github.com/Bourbon24k/tendies-depth-fix). A user reported one working Sora result on iPhone 17 / iOS 27.3 after two variants were imported; the exact selected variant was not established. The integrated app has been built but **not tested on an iPhone**. The patch may not work on every wallpaper or iOS version and does not create missing subject masks. Upstream's supported iOS range remains as stated below.
+
+### Build and verify
+
+Build with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build.sh`. The resulting IPA is **unsigned**; installation requires a valid signing profile and an available app-group entitlement for KAMUI's escape technique. Replacing an existing installation signed by a different team can fail or affect application data; retain a backup and verify signing compatibility. No signed IPA is included.
+
+For macOS unit tests:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun clang -fobjc-arc -framework Foundation tests/depthfix_runner.m src/BQDepthFix.m -o /tmp/kamui-depthfix-runner
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+The upstream README follows.
+
+---
+
 # KAMUI — iOS 27.x sandbox escape + MobileGestalt editor
 
 > *Kamui (神威) — the eye that phases matter into another dimension. Here one

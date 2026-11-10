@@ -1,5 +1,6 @@
 #import "PosterBoardVC.h"
 #import "BQCore.h"
+#import "BQDepthFix.h"
 #import "BQUI.h"
 #import "TendiesExploreVC.h"
 
@@ -155,21 +156,27 @@
     [self.navigationController pushViewController:vc animated:YES];
 }
 
+- (void)depthFixChanged:(UISwitch *)toggle {
+    [[NSUserDefaults standardUserDefaults] setBool:toggle.on forKey:BQDepthFixEnabledKey];
+}
+
 - (void)respring {
     BQConfirm(self, @"Respring?", @"Restart SpringBoard to apply wallpaper changes.", ^{ BQRespring(); });
 }
 
 #pragma mark - Table
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 6;
+    if (section == 1) return 1;
     return self.files.count;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return @"Actions";
+    if (section == 1) return NSLocalizedString(@"Depth Effect", nil);
     return self.files.count ? @"Imported packs" : nil;
 }
 
@@ -177,6 +184,7 @@
     if (section == 0) {
         return @"Import up to 5 packs. More than 15 is a bad idea. Applying writes descriptor folders into PosterBoard; use Reset to remove them.";
     }
+    if (section == 1) return NSLocalizedString(@"Experimental. Fixes compatible wallpapers when applied; original files are not changed.", nil);
     return nil;
 }
 
@@ -189,6 +197,17 @@
         cell.textLabel.textColor = indexPath.row == 3 ? [UIColor systemRedColor] : self.view.tintColor;
         cell.textLabel.textAlignment = NSTextAlignmentLeft;
         cell.accessoryType = UITableViewCellAccessoryNone;
+        return cell;
+    }
+    if (indexPath.section == 1) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"depth-switch"];
+        if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"depth-switch"];
+        cell.textLabel.text = NSLocalizedString(@"Fix Depth Effect", nil);
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] init];
+        toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:BQDepthFixEnabledKey];
+        [toggle addTarget:self action:@selector(depthFixChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
         return cell;
     }
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"file"];
@@ -217,7 +236,7 @@
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section != 1) return nil;
+    if (indexPath.section != 2) return nil;
     UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
                                                                      title:@"Delete"
                                                                    handler:^(UIContextualAction *action, UIView *v, void (^done)(BOOL)) {

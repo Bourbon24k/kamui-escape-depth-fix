@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "${SDK:-}" ]; then
@@ -12,7 +12,7 @@ if [ -z "${SDK:-}" ]; then
     fi
 fi
 APP_NAME="BQTool"
-VERSION="2.5.0"
+VERSION="2.5.0-depthfix"
 BID="${BID:-com.kamui.escape}"
 BUILD="$ROOT/build"
 APP="$BUILD/Payload/$APP_NAME.app"
@@ -53,6 +53,7 @@ clang \
     "$ROOT/src/FilesVC.m" \
     "$ROOT/src/BQUI.m" \
     "$ROOT/src/BQCore.m" \
+    "$ROOT/src/BQDepthFix.m" \
     -o "$APP/$APP_NAME"
 
 cp "$ROOT/src/Info.plist" "$APP/Info.plist"

@@ -152,3 +152,7 @@
 "Save failed" = "Ошибка сохранения";
 "Binary file" = "Бинарный файл";
 "Full MCM container access: app data, app groups, system groups and system data." = "Полный доступ к контейнерам MCM: данные приложений, группы приложений, системные группы и системные данные.";
+
+"Depth Effect" = "Эффект глубины";
+"Fix Depth Effect" = "Исправлять эффект глубины";
+"Experimental. Fixes compatible wallpapers when applied; original files are not changed." = "Экспериментально. Исправляет совместимые обои при применении; исходные файлы не изменяются.";
