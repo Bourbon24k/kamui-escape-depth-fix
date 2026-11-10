@@ -7,6 +7,8 @@
 @property (nonatomic, copy) NSString *mgStatus;
 @property (nonatomic, copy) NSString *pbStatus;
 @property (nonatomic, copy) NSString *managedGroup;
+- (void)restoreDiagnosticStatus;
+- (void)saveDiagnosticStatus;
 @end
 
 @implementation SettingsVC
@@ -20,8 +22,38 @@
     self.title = NSLocalizedString(@"Settings", nil);
     self.mgStatus = NSLocalizedString(@"not checked", nil);
     self.pbStatus = NSLocalizedString(@"not checked", nil);
+    [self restoreDiagnosticStatus];
     self.managedGroup = [[NSUserDefaults standardUserDefaults] stringForKey:@"BQManagedGroupName"];
     if (!self.managedGroup.length) self.managedGroup = @"KAMUI Test Group";
+}
+
+- (void)restoreDiagnosticStatus {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *osVersion = [UIDevice currentDevice].systemVersion ?: @"";
+    NSString *groupID = BQGroupID() ?: @"";
+    NSString *groupRoot = BQGroupRoot() ?: @"";
+    NSString *build = [[NSBundle mainBundle].infoDictionary[@"CFBundleVersion"] description] ?: @"";
+    BOOL matchesCurrentEnvironment =
+        [[defaults stringForKey:@"BQDiagnosticOSVersion"] isEqualToString:osVersion] &&
+        [[defaults stringForKey:@"BQDiagnosticGroupID"] isEqualToString:groupID] &&
+        [[defaults stringForKey:@"BQDiagnosticGroupRoot"] isEqualToString:groupRoot] &&
+        [[defaults stringForKey:@"BQDiagnosticBuild"] isEqualToString:build];
+    if (!matchesCurrentEnvironment) return;
+
+    NSString *mgStatus = [defaults stringForKey:@"BQDiagnosticMGStatus"];
+    NSString *pbStatus = [defaults stringForKey:@"BQDiagnosticPBStatus"];
+    if ([mgStatus isKindOfClass:NSString.class]) self.mgStatus = mgStatus;
+    if ([pbStatus isKindOfClass:NSString.class]) self.pbStatus = pbStatus;
+}
+
+- (void)saveDiagnosticStatus {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:[UIDevice currentDevice].systemVersion ?: @"" forKey:@"BQDiagnosticOSVersion"];
+    [defaults setObject:BQGroupID() ?: @"" forKey:@"BQDiagnosticGroupID"];
+    [defaults setObject:BQGroupRoot() ?: @"" forKey:@"BQDiagnosticGroupRoot"];
+    [defaults setObject:[[NSBundle mainBundle].infoDictionary[@"CFBundleVersion"] description] ?: @"" forKey:@"BQDiagnosticBuild"];
+    [defaults setObject:self.mgStatus ?: NSLocalizedString(@"not checked", nil) forKey:@"BQDiagnosticMGStatus"];
+    [defaults setObject:self.pbStatus ?: NSLocalizedString(@"not checked", nil) forKey:@"BQDiagnosticPBStatus"];
 }
 
 - (BOOL)bannerEnabled {
@@ -120,8 +152,7 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    NSString *pb = [[NSUserDefaults standardUserDefaults] stringForKey:@"BQPBContainer"];
-    if (pb.length) self.pbStatus = pb;
+    [self restoreDiagnosticStatus];
     [self.tableView reloadData];
     [self updateBanner];
 }
@@ -137,10 +168,15 @@
             [busy hide];
             self.mgStatus = mg ? NSLocalizedString(@"read/write OK", nil) : [NSString stringWithFormat:NSLocalizedString(@"FAILED: %@", nil), mgErr ?: NSLocalizedString(@"unknown", nil)];
             self.pbStatus = pb ?: [NSString stringWithFormat:NSLocalizedString(@"not found: %@", nil), pbErr ?: NSLocalizedString(@"unknown", nil)];
+            [self saveDiagnosticStatus];
             [self.tableView reloadData];
+            NSString *groupAdvice = BQGroupID().length
+                ? @""
+                : NSLocalizedString(@"No App Group entitlement was found. Re-sign with a profile that includes an App Group; the class-7 route needs it on iOS 26 and 27.2.", nil);
             BQAlert(self, NSLocalizedString(@"Diagnostics", nil),
-                    [NSString stringWithFormat:NSLocalizedString(@"MobileGestalt: %@\n\nPosterBoard: %@\n\nApp group:\n%@", nil),
-                     self.mgStatus, self.pbStatus, BQGroupRoot() ?: @"(nil)"]);
+                    [NSString stringWithFormat:NSLocalizedString(@"MobileGestalt: %@\n\nPosterBoard: %@\n\nApp group:\n%@%@", nil),
+                     self.mgStatus, self.pbStatus, BQGroupRoot() ?: @"(nil)",
+                     groupAdvice.length ? [@"\n\n" stringByAppendingString:groupAdvice] : @""]);
         });
     });
 }
@@ -206,7 +242,14 @@
         if (indexPath.row == 0) {
             cell.textLabel.text = NSLocalizedString(@"App Group", nil);
             NSString *gid = BQGroupID();
-            cell.detailTextLabel.text = gid.length ? gid : @"none — legacy class13 fallback";
+            if (gid.length) {
+                cell.detailTextLabel.text = gid;
+            } else {
+                NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
+                cell.detailTextLabel.text = (os.majorVersion == 26 || os.majorVersion >= 27)
+                    ? NSLocalizedString(@"none — App Group needed for class-7", nil)
+                    : @"none — legacy fallback";
+            }
         } else if (indexPath.row == 1) {
             cell.textLabel.text = NSLocalizedString(@"MobileGestalt", nil);
             cell.detailTextLabel.text = self.mgStatus;

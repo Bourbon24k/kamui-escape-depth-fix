@@ -228,7 +228,9 @@ static NSString * const kWallpaperCell = @"WallpaperCardCell";
     [super viewDidLoad];
     self.title = NSLocalizedString(@"Explore Wallpapers", nil);
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
+    // The catalog has its own filters immediately below the navigation bar.
+    // An expanded large-title bar overlaps those controls on compact layouts.
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
 
     UIButton *filterButton = [UIButton buttonWithType:UIButtonTypeSystem];
     filterButton.frame = CGRectMake(0, 0, 50, 50);
@@ -263,7 +265,7 @@ static NSString * const kWallpaperCell = @"WallpaperCardCell";
     [NSLayoutConstraint activateConstraints:@[
         [self.filtersHeader.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.filtersHeader.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.filtersHeader.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.filtersHeader.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
         [self.filtersHeader.heightAnchor constraintEqualToConstant:173],
         [self.collectionView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.collectionView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
@@ -418,7 +420,7 @@ static NSString * const kWallpaperCell = @"WallpaperCardCell";
         [self applyFilters];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Refresh catalog", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self loadCatalog]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     UIPopoverPresentationController *popover = sheet.popoverPresentationController;
     if (popover) { popover.barButtonItem = self.navigationItem.rightBarButtonItem; }
     [self presentViewController:sheet animated:YES completion:nil];
@@ -440,7 +442,7 @@ static NSString * const kWallpaperCell = @"WallpaperCardCell";
 - (void)download:(NSDictionary *)item {
     NSString *rel = item[@"url"];
     if (![rel isKindOfClass:NSString.class] || !rel.length) {
-        BQAlert(self, @"Download failed", @"The catalog entry has no valid wallpaper URL.");
+        BQAlert(self, NSLocalizedString(@"Download failed", nil), NSLocalizedString(@"The catalog entry has no valid wallpaper URL.", nil));
         return;
     }
     NSString *baseString = [item[@"bq_download_base"] isKindOfClass:NSString.class] ? item[@"bq_download_base"] : kCatalogBase;
@@ -448,18 +450,18 @@ static NSString * const kWallpaperCell = @"WallpaperCardCell";
     NSURL *url = [NSURL URLWithString:rel relativeToURL:base].absoluteURL;
     NSString *scheme = url.scheme.lowercaseString;
     if (!url || (![scheme isEqualToString:@"https"] && ![scheme isEqualToString:@"http"])) {
-        BQAlert(self, @"Download failed", @"The catalog entry has an invalid wallpaper URL.");
+        BQAlert(self, NSLocalizedString(@"Download failed", nil), NSLocalizedString(@"The catalog entry has an invalid wallpaper URL.", nil));
         return;
     }
     NSString *name = item[@"name"] ?: url.lastPathComponent;
-    BQBusyView *busy = [BQBusyView showInView:self.view text:[NSString stringWithFormat:@"Downloading %@…", name]];
+    BQBusyView *busy = [BQBusyView showInView:self.view text:[NSString stringWithFormat:NSLocalizedString(@"Downloading %@...", nil), name]];
     [[NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [busy hide];
             NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 200;
-            if (error || status < 200 || status >= 300) { BQAlert(self, @"Download failed", error.localizedDescription ?: [NSString stringWithFormat:@"HTTP %ld", (long)status]); return; }
+            if (error || status < 200 || status >= 300) { BQAlert(self, NSLocalizedString(@"Download failed", nil), error.localizedDescription ?: [NSString stringWithFormat:NSLocalizedString(@"HTTP %ld", nil), (long)status]); return; }
             if (data.length < 4 || ((const uint8_t *)data.bytes)[0] != 'P' || ((const uint8_t *)data.bytes)[1] != 'K') {
-                BQAlert(self, @"Download failed", @"The server response is not a .tendies ZIP file.");
+                BQAlert(self, NSLocalizedString(@"Download failed", nil), NSLocalizedString(@"The server response is not a .tendies ZIP file.", nil));
                 return;
             }
             NSString *directory = [BQDocuments() stringByAppendingPathComponent:@"tendies"];
@@ -471,32 +473,32 @@ static NSString * const kWallpaperCell = @"WallpaperCardCell";
             }
             NSError *writeError = nil;
             if (![data writeToURL:[NSURL fileURLWithPath:destination] options:NSDataWritingAtomic error:&writeError]) {
-                BQAlert(self, @"Save failed", writeError.localizedDescription ?: @"write error");
+                BQAlert(self, NSLocalizedString(@"Save failed", nil), writeError.localizedDescription ?: NSLocalizedString(@"write error", nil));
                 return;
             }
             BQLog(@"downloaded %@ (%lu bytes) -> %@", name, (unsigned long)data.length, leaf);
             if (self.onDownload) self.onDownload();
-            UIAlertController *prompt = [UIAlertController alertControllerWithTitle:@"Downloaded"
-                message:[NSString stringWithFormat:@"%@ saved to Documents/tendies.\nApply now?", name]
+            UIAlertController *prompt = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Downloaded", nil)
+                message:[NSString stringWithFormat:NSLocalizedString(@"%@ saved to Documents/tendies.\nApply now?", nil), name]
                 preferredStyle:UIAlertControllerStyleAlert];
-            [prompt addAction:[UIAlertAction actionWithTitle:@"Later" style:UIAlertActionStyleCancel handler:nil]];
-            [prompt addAction:[UIAlertAction actionWithTitle:@"Apply now" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                BQBusyView *work = [BQBusyView showInView:self.view text:@"Applying wallpaper…"];
+            [prompt addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Later", nil) style:UIAlertActionStyleCancel handler:nil]];
+            [prompt addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Apply now", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                BQBusyView *work = [BQBusyView showInView:self.view text:NSLocalizedString(@"Applying wallpaper...", nil)];
                 dispatch_async(BQWorkQueue(), ^{
                     NSString *applyError = nil;
                     int count = 0;
                     BOOL ok = BQApplyTendies([NSURL fileURLWithPath:destination], &count, &applyError);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [work hide];
-                        if (!ok) { BQAlert(self, @"Apply failed", applyError ?: @"unknown error"); return; }
-                        UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Applied"
-                            message:[NSString stringWithFormat:@"%d descriptor(s) written.\n\n1. Tap Open PosterBoard once so it discovers the new descriptors.\n2. Open the App Switcher and swipe PosterBoard away to close it.\n3. Return to KAMUI and tap Respring.\n4. After respring, touch and hold the Lock Screen, tap +, and choose the wallpaper. PosterBoard itself is not the wallpaper picker.", count]
+                        if (!ok) { BQAlert(self, NSLocalizedString(@"Apply failed", nil), applyError ?: NSLocalizedString(@"unknown error", nil)); return; }
+                        UIAlertController *done = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Applied", nil)
+                            message:[NSString stringWithFormat:NSLocalizedString(@"%d descriptor(s) written.\n\n1. Open PosterBoard once so it discovers the new wallpapers.\n2. Close PosterBoard from the App Switcher.\n3. Return to KAMUI and tap Respring.\n4. After respring, touch and hold the Lock Screen, tap +, and select the wallpaper.", nil), count]
                             preferredStyle:UIAlertControllerStyleAlert];
-                        [done addAction:[UIAlertAction actionWithTitle:@"Open PosterBoard" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
-                            if (!BQOpenPosterBoard()) BQAlert(self, @"Open failed", @"Could not open com.apple.PosterBoard.");
+                        [done addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Open PosterBoard", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                            if (!BQOpenPosterBoard()) BQAlert(self, NSLocalizedString(@"Open failed", nil), NSLocalizedString(@"Could not open com.apple.PosterBoard.", nil));
                         }]];
-                        [done addAction:[UIAlertAction actionWithTitle:@"Respring" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { BQRespring(); }]];
-                        [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                        [done addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Respring", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { BQRespring(); }]];
+                        [done addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleCancel handler:nil]];
                         [self presentViewController:done animated:YES completion:nil];
                     });
                 });

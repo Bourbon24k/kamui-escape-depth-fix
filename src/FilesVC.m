@@ -234,8 +234,8 @@
     BOOL access = [u startAccessingSecurityScopedResource];
     NSData *data = [NSData dataWithContentsOfURL:u];
     if (access) [u stopAccessingSecurityScopedResource];
-    if (!data.length) { BQAlert(self, NSLocalizedString(@"Import failed", nil), @"empty file"); return; }
-    NSString *name = u.lastPathComponent.length ? u.lastPathComponent : @"file";
+    if (!data.length) { BQAlert(self, NSLocalizedString(@"Import failed", nil), NSLocalizedString(@"The selected file is empty.", nil)); return; }
+    NSString *name = u.lastPathComponent.length ? u.lastPathComponent : NSLocalizedString(@"File", nil);
     NSString *rel = self.rel.length ? [self.rel stringByAppendingPathComponent:name] : name;
     NSString *err = nil;
     if (!BQWritePath(self.container, rel, data, &err)) {

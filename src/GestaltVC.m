@@ -501,7 +501,7 @@ static NSString *BQValueSummary(id v) {
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.keyboardType = UIKeyboardTypeNumberPad;
-        tf.placeholder = @"e.g. 2976";
+        tf.placeholder = NSLocalizedString(@"e.g. 2976", nil);
     }];
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Apply", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
@@ -783,7 +783,7 @@ static NSString *BQValueSummary(id v) {
 }
 
 - (void)respring {
-    BQConfirm(self, @"Respring?", NSLocalizedString(@"This restarts SpringBoard. Open apps will be closed.", nil), ^{ BQRespring(); });
+    BQConfirm(self, NSLocalizedString(@"Respring?", nil), NSLocalizedString(@"This restarts SpringBoard. Open apps will be closed.", nil), ^{ BQRespring(); });
 }
 
 - (void)addKey {
