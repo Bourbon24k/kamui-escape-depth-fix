@@ -8,6 +8,15 @@ PosterBoard has an opt-in **Fix Depth Effect** switch (off by default). During a
 
 This is an experiment based on the separate [Tendies Depth Fix](https://github.com/Bourbon24k/tendies-depth-fix). A user reported one working Sora result on iPhone 17 / iOS 27.3 after two variants were imported; the exact selected variant was not established. The integrated app has been built but **not tested on an iPhone**. The patch may not work on every wallpaper or iOS version and does not create missing subject masks. Upstream's supported iOS range remains as stated below.
 
+### iOS compatibility / Совместимость с iOS
+
+- The [upstream KAMUI project](https://github.com/murk-sus/kamui-escape/tree/v2.5.0) lists **iOS 27.0.1–27.2**, with **27.2 (24B115)** as its primary tested target. This is the upstream scope; the modified app has not been tested on those versions.
+- On **iPhone 17, iOS 27.3**, the original KAMUI 2.5.0 was observed importing wallpapers, and a user reported success after separately prepared Sora test packages. **This fork's IPA and integrated switch have not been tested on that device or OS.** This is not a claim of full iOS 27.3 compatibility.
+- Older than 27.0.1, newer builds, other devices, and other wallpaper types: **not verified**. The build's minimum deployment target does not establish runtime compatibility.
+- The IPA is unsigned. A signing profile and usable app-group entitlement are needed for the primary mechanism; the actual result depends on the device, iOS build and signing method. Check upstream requirements before installation.
+
+По данным оригинального KAMUI заявлен диапазон **iOS 27.0.1–27.2**, основной проверенный вариант — **27.2 (24B115)**. На iOS 27.3 мы наблюдали импорт обоев в оригинальном KAMUI, а пользователь сообщил об успехе с одним из внешне подготовленных вариантов Sora. **IPA этого форка и встроенный переключатель на iPhone ещё не проверялись**. Остальные версии и устройства не проверены; подпись приложения и доступная группа приложений влияют на работу.
+
 ### Build and verify
 
 Build with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build.sh`. The resulting IPA is **unsigned**; installation requires a valid signing profile and an available app-group entitlement for KAMUI's escape technique. Replacing an existing installation signed by a different team can fail or affect application data; retain a backup and verify signing compatibility. No signed IPA is included.
