@@ -208,14 +208,14 @@ static NSString *BQValueSummary(id v) {
     self.refreshControl = rc;
 
     self.presets = @[
-        @{@"title": NSLocalizedString(@"Always-On Display", nil), @"keys": @[@"2OOJf1VhaM7NxfRok3HbWQ", @"j8/Omm6s1lsmTDFsXjsBfA"], @"value": @YES},
-        @{@"title": NSLocalizedString(@"AOD Vibrancy", nil), @"keys": @[@"ykpu7qyhqFweVMKtxNylWA"], @"value": @YES},
+        @{@"title": NSLocalizedString(@"Always-On Display", nil), @"keys": @[@"2OOJf1VhaM7NxfRok3HbWQ", @"j8/Omm6s1lsmTDFsXjsBfA"], @"value": @YES, @"minOS": @18},
+        @{@"title": NSLocalizedString(@"AOD Vibrancy", nil), @"keys": @[@"ykpu7qyhqFweVMKtxNylWA"], @"value": @YES, @"minOS": @18},
         @{@"title": NSLocalizedString(@"Boot Chime", nil), @"keys": @[@"QHxt+hGLaBPbQJbXiUJX3w"], @"value": @YES},
-        @{@"title": NSLocalizedString(@"80% Charge Limit", nil), @"keys": @[@"37NVydb//GP/GrhuTN+exg"], @"value": @YES},
+        @{@"title": NSLocalizedString(@"80% Charge Limit", nil), @"keys": @[@"37NVydb//GP/GrhuTN+exg"], @"value": @YES, @"minOS": @17},
         @{@"title": NSLocalizedString(@"Tap to Wake", nil), @"keys": @[@"yZf3GTRMGTuwSV/lD7Cagw"], @"value": @YES},
         @{@"title": NSLocalizedString(@"Stage Manager", nil), @"keys": @[@"qeaj75wk3HF4DwQ8qbIi7g"], @"value": @YES},
         @{@"title": NSLocalizedString(@"Apple Pencil", nil), @"keys": @[@"yhHcB0iH0d1XzPO/CFd3ow"], @"value": @YES},
-        @{@"title": NSLocalizedString(@"Action Button", nil), @"keys": @[@"cT44WE1EohiwRzhsZ8xEsw"], @"value": @YES},
+        @{@"title": NSLocalizedString(@"Action Button", nil), @"keys": @[@"cT44WE1EohiwRzhsZ8xEsw"], @"value": @YES, @"minOS": @17},
         @{@"title": NSLocalizedString(@"Collision SOS", nil), @"keys": @[@"HCzWusHQwZDea6nNhaKndw"], @"value": @YES},
         @{@"title": NSLocalizedString(@"Disable Parallax", nil), @"keys": @[@"UIParallaxCapability"], @"value": @NO},
     ];
@@ -330,9 +330,48 @@ static NSString *BQValueSummary(id v) {
     return YES;
 }
 
+- (NSInteger)minimumMajorVersionForPreset:(NSDictionary *)preset {
+    id value = preset[@"minOS"];
+    return [value isKindOfClass:[NSNumber class]] ? [value integerValue] : 0;
+}
+
+- (BOOL)isPresetAvailable:(NSDictionary *)preset {
+    NSInteger minimumMajorVersion = [self minimumMajorVersionForPreset:preset];
+    return minimumMajorVersion == 0 || NSProcessInfo.processInfo.operatingSystemVersion.majorVersion >= minimumMajorVersion;
+}
+
+- (NSString *)compatibilityStatusForPreset:(NSDictionary *)preset {
+    NSOperatingSystemVersion version = NSProcessInfo.processInfo.operatingSystemVersion;
+    NSInteger minimumMajorVersion = [self minimumMajorVersionForPreset:preset];
+    if (minimumMajorVersion > version.majorVersion) {
+        return [NSString stringWithFormat:NSLocalizedString(@"Requires iOS %ld or later", nil), (long)minimumMajorVersion];
+    }
+
+    NSString *productType = self.originalProductType;
+    NSArray<NSDictionary *> *testedOn = [preset[@"testedOn"] isKindOfClass:[NSArray class]] ? preset[@"testedOn"] : @[];
+    for (NSDictionary *record in testedOn) {
+        if (![record isKindOfClass:[NSDictionary class]]) continue;
+        id testedProduct = record[@"product"];
+        id testedMajor = record[@"iOSMajor"];
+        if ([testedProduct isKindOfClass:[NSString class]] && [testedMajor isKindOfClass:[NSNumber class]] &&
+            [testedProduct isEqualToString:productType] && [testedMajor integerValue] == version.majorVersion) {
+            return NSLocalizedString(@"Verified on this device and iOS version", nil);
+        }
+    }
+
+    if (productType.length) {
+        return [NSString stringWithFormat:NSLocalizedString(@"Not verified on %@ · iOS %ld", nil), productType, (long)version.majorVersion];
+    }
+    return [NSString stringWithFormat:NSLocalizedString(@"Device compatibility not verified · iOS %ld", nil), (long)version.majorVersion];
+}
+
 - (void)presetChanged:(UISwitch *)sw {
     if (sw.tag < 0 || sw.tag >= (NSInteger)self.presets.count) return;
     NSDictionary *p = self.presets[sw.tag];
+    if (![self isPresetAvailable:p] && sw.isOn) {
+        sw.on = [self presetOn:p];
+        return;
+    }
     if (sw.isOn) {
         for (NSString *k in p[@"keys"]) self.cacheExtra[k] = p[@"value"];
     } else {
@@ -462,7 +501,7 @@ static NSString *BQValueSummary(id v) {
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.keyboardType = UIKeyboardTypeNumberPad;
-        tf.placeholder = @"e.g. 2976";
+        tf.placeholder = NSLocalizedString(@"e.g. 2976", nil);
     }];
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Apply", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
@@ -744,7 +783,7 @@ static NSString *BQValueSummary(id v) {
 }
 
 - (void)respring {
-    BQConfirm(self, @"Respring?", NSLocalizedString(@"This restarts SpringBoard. Open apps will be closed.", nil), ^{ BQRespring(); });
+    BQConfirm(self, NSLocalizedString(@"Respring?", nil), NSLocalizedString(@"This restarts SpringBoard. Open apps will be closed.", nil), ^{ BQRespring(); });
 }
 
 - (void)addKey {
@@ -835,10 +874,13 @@ static NSString *BQValueSummary(id v) {
     }
     if (indexPath.section == 1) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"preset"];
-        if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"preset"];
+        if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"preset"];
         NSDictionary *p = self.presets[indexPath.row];
         cell.textLabel.text = p[@"title"];
-        cell.textLabel.textColor = [UIColor labelColor];
+        BOOL available = [self isPresetAvailable:p];
+        cell.textLabel.textColor = available ? [UIColor labelColor] : [UIColor secondaryLabelColor];
+        cell.detailTextLabel.text = [self compatibilityStatusForPreset:p];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         UISwitch *sw = (UISwitch *)cell.accessoryView;
         if (![sw isKindOfClass:[UISwitch class]]) {
@@ -849,6 +891,7 @@ static NSString *BQValueSummary(id v) {
         }
         sw.tag = indexPath.row;
         sw.on = [self presetOn:p];
+        sw.enabled = available || [self presetOn:p];
         return cell;
     }
     if (indexPath.section == 2) {

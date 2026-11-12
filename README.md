@@ -1,6 +1,6 @@
 # KAMUI Depth Fix — community fork
 
-This is an independent fork of [murk-sus/kamui-escape](https://github.com/murk-sus/kamui-escape), based on the upstream **v2.5.0** release. Upstream retains authorship and its MIT license; this fork is not an official KAMUI release.
+This is an independent fork of [murk-sus/kamui-escape](https://github.com/murk-sus/kamui-escape), updated to the upstream **v2.5.2** release. Upstream retains authorship and its MIT license; this fork is not an official KAMUI release.
 
 ## Experimental depth-effect switch
 
@@ -10,12 +10,12 @@ This is an experiment based on the separate [Tendies Depth Fix](https://github.c
 
 ### iOS compatibility / Совместимость с iOS
 
-- The [upstream KAMUI project](https://github.com/murk-sus/kamui-escape/tree/v2.5.0) lists **iOS 27.0.1–27.2**, with **27.2 (24B115)** as its primary tested target. This is the upstream scope; the modified app has not been tested on those versions.
+- The [upstream KAMUI project](https://github.com/murk-sus/kamui-escape/tree/v2.5.2) targets **iOS 26.x and iOS 27.0.1–27.2**. iOS 26 requires an App Group entitlement and on-device verification for each point release and signing method. This is the upstream scope; the modified app has not been tested on those versions.
 - On **iPhone 17, iOS 27.3**, the original KAMUI 2.5.0 was observed importing wallpapers, and a user reported success after separately prepared Sora test packages. **This fork's IPA and integrated switch have not been tested on that device or OS.** This is not a claim of full iOS 27.3 compatibility.
-- Older than 27.0.1, newer builds, other devices, and other wallpaper types: **not verified**. The build's minimum deployment target does not establish runtime compatibility.
+- Other builds, devices, and wallpaper types: **not verified in this fork**. The build's minimum deployment target does not establish runtime compatibility.
 - The IPA is unsigned. A signing profile and usable app-group entitlement are needed for the primary mechanism; the actual result depends on the device, iOS build and signing method. Check upstream requirements before installation.
 
-По данным оригинального KAMUI заявлен диапазон **iOS 27.0.1–27.2**, основной проверенный вариант — **27.2 (24B115)**. На iOS 27.3 мы наблюдали импорт обоев в оригинальном KAMUI, а пользователь сообщил об успехе с одним из внешне подготовленных вариантов Sora. **IPA этого форка и встроенный переключатель на iPhone ещё не проверялись**. Остальные версии и устройства не проверены; подпись приложения и доступная группа приложений влияют на работу.
+Оригинальный KAMUI 2.5.2 нацелен на **iOS 26.x и 27.0.1–27.2**; для iOS 26 нужна App Group и проверка конкретной версии и способа подписи на устройстве. На iOS 27.3 мы наблюдали импорт обоев в оригинальном KAMUI 2.5.0, а пользователь сообщил об успехе с одним из внешне подготовленных вариантов Sora. **IPA этого форка и встроенный переключатель на iPhone ещё не проверялись**. Подпись приложения и доступная группа приложений влияют на работу.
 
 ### Build and verify
 
@@ -32,7 +32,7 @@ The upstream README follows.
 
 ---
 
-# KAMUI — iOS 27.x sandbox escape + MobileGestalt editor
+# KAMUI — iOS 26/27 MobileGestalt editor and PosterBoard tools
 
 > *Kamui (神威) — the eye that phases matter into another dimension. Here one
 > symlinked part directory makes `containermanagerd` issue a sandbox extension
@@ -42,7 +42,9 @@ The upstream README follows.
 testers, a private group or an allowlist. Anyone can use, study, modify,
 redistribute and ship the MobileGestalt editor under the MIT license.
 
-Supported: **iOS 27.0.1 – 27.2** (primary target 27.2 / 24B115).
+Compatibility work targets **iOS 26.x and iOS 27.0.1–27.2**. iOS 26 requires
+an App Group entitlement and still needs on-device verification for each point
+release and signing method.
 
 This repository contains the escape engine, the **KAMUI** app source (internal
 target `BQTool`) and the release IPA.
@@ -56,7 +58,7 @@ the repository, build the app, install the IPA, fork it, publish your own
 build — the MIT license allows all of it.
 
 The MobileGestalt editor itself has no access check and no allowlist. The only
-technical requirement on **iOS 27.2** is that the running app has at least
+technical requirement on **iOS 26 and 27.2** is that the running app has at least
 one `com.apple.security.application-groups` entitlement, because the class-7
 escape path uses the app-group container. KAMUI reads that entitlement at
 runtime. On some **27.0.x** builds the legacy class-13 traversal may work even
@@ -171,14 +173,14 @@ It picks the first group that yields a
 uses that group identifier. A build with **any** app group works; there is no
 hardcoded identifier.
 
-### 2.5 Multi-strategy escape (27.0.1–27.2)
+### 2.5 Multi-strategy escape (iOS 26.x / 27.0.1–27.2)
 
 `BQEscape` tries, in order, and logs every attempt:
 
 | # | Strategy | Needs app group | Likely versions |
 |---|---|---|---|
 | 1 | class 13 + `partDomain` traversal (old `bad_query`) | no | 27.0.x where traversal is still open |
-| 2 | class 7 part-directory symlink | yes | 27.2 |
+| 2 | class 7 part-directory symlink | yes | iOS 26.x / 27.2 |
 | 3 | class 13 direct MG query | no | builds that issue a token |
 | 4 | class 12 geod + traversal | no | older builds |
 
@@ -217,7 +219,7 @@ Requirements: Linux/macOS, clang, Python 3, an iOS SDK (Theos SDK works), zlib.
 
 ```bash
 ./build.sh
-# -> build/KAMUI-2.4.11.ipa
+# -> build/KAMUI-2.5.2.ipa
 ```
 
 The default bundle identifier is `com.kamui.escape`. Override with `BID=...`.
@@ -227,15 +229,15 @@ The SDK path can be overridden with `SDK=...`.
 
 ## 5. Install and runtime requirement
 
-Anyone can install `KAMUI-2.4.11.ipa`; use whatever installation method you
+Anyone can install the IPA; use whatever installation method you
 normally use.
 
-The primary 27.2 strategy needs the running app to have at least one
+The primary class-7 strategy needs the running app to have at least one
 `com.apple.security.application-groups` entitlement. KAMUI reads its own
 entitlements at runtime and uses the first group that has a container URL.
 
-- **With an app group** — class 7 is attempted after the class-13 fallback and
-  is the working path on 27.2.
+- **With an app group** — class 7 is attempted after the class-13 fallback.
+  iOS 26 uses its App Group-specific operation flag.
 - **Without an app group** — the app logs `(none)` and tries the legacy
   class-13 traversal. That may work on some 27.0.x builds; it is closed on
   27.2.
@@ -285,6 +287,9 @@ escape: using class7 symlink
 - **2.5.0** — adds the Files tab / full MCM container browser and fixes the
   post-load Gestalt key-sorting crash. Arbitrary paths outside MCM remain
   blocked.
+- **2.5.2** — adds iOS 26 App Group flag handling, broader PosterBoard
+  container discovery, clearer entitlement diagnostics, recovery for failed
+  temporary writes, and complete seven-language UI/error localization.
 - **27.2 (24B115)** — primary, tested: class-13 traversal closed; class-7
   part-directory symlink works.
 - **27.0.1 / 27.1** — the class-13 traversal or class-12 geod fallback may

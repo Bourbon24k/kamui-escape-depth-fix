@@ -12,7 +12,7 @@ if [ -z "${SDK:-}" ]; then
     fi
 fi
 APP_NAME="BQTool"
-VERSION="2.5.0-depthfix"
+VERSION="2.5.2-depthfix"
 BID="${BID:-com.kamui.escape}"
 BUILD="$ROOT/build"
 APP="$BUILD/Payload/$APP_NAME.app"
@@ -20,7 +20,7 @@ APP="$BUILD/Payload/$APP_NAME.app"
 echo "[*] SDK: $SDK"
 [ -d "$SDK" ] || { echo "[!] SDK missing"; exit 1; }
 
-rm -rf "$BUILD"
+rm -rf "$BUILD/Payload"
 mkdir -p "$APP"
 
 echo "[*] compiling..."
@@ -69,6 +69,7 @@ with open(path, "wb") as target:
     plistlib.dump(info, target, fmt=plistlib.FMT_XML, sort_keys=False)
 PY
 cp "$ROOT/src/respring.html" "$APP/respring.html"
+cp "$ROOT/src/AppIcon.png" "$APP/AppIcon.png"
 for localization in "$ROOT"/src/*.lproj; do
     [ -d "$localization" ] || continue
     cp -R "$localization" "$APP/"

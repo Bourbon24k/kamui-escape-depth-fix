@@ -1,4 +1,5 @@
 #import "BQUI.h"
+#import "RootTabBarController.h"
 
 static UIWindow *BQKeyWindow(void) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -8,6 +9,31 @@ static UIWindow *BQKeyWindow(void) {
         }
     }
     return UIApplication.sharedApplication.windows.firstObject;
+}
+
+NSString *BQLocalizedString(NSString *key) {
+    NSString *code = [[NSUserDefaults standardUserDefaults] stringForKey:@"BQLanguageOverride"];
+    if (code.length) {
+        NSString *path = [[NSBundle mainBundle] pathForResource:code ofType:@"lproj"];
+        NSBundle *languageBundle = path ? [NSBundle bundleWithPath:path] : nil;
+        if (languageBundle) return [languageBundle localizedStringForKey:key value:nil table:nil];
+    }
+    return [[NSBundle mainBundle] localizedStringForKey:key value:nil table:nil];
+}
+
+void BQReloadRootViewController(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *window = BQKeyWindow();
+        if (!window) return;
+        NSUInteger selectedIndex = 0;
+        if ([window.rootViewController isKindOfClass:RootTabBarController.class]) {
+            selectedIndex = ((RootTabBarController *)window.rootViewController).selectedIndex;
+        }
+        RootTabBarController *root = [[RootTabBarController alloc] init];
+        [root loadViewIfNeeded];
+        root.selectedIndex = MIN(selectedIndex, root.viewControllers.count - 1);
+        window.rootViewController = root;
+    });
 }
 
 UIViewController *BQTopViewController(void) {
@@ -29,7 +55,7 @@ void BQAlert(UIViewController *vc, NSString *title, NSString *message) {
         UIAlertController *a = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
         [top presentViewController:a animated:YES completion:nil];
     });
 }
@@ -41,8 +67,8 @@ void BQConfirm(UIViewController *vc, NSString *title, NSString *message, void (^
         UIAlertController *a = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [a addAction:[UIAlertAction actionWithTitle:@"Continue" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
+        [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+        [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Continue", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
             if (action) action();
         }]];
         [top presentViewController:a animated:YES completion:nil];

@@ -1,3 +1,44 @@
+# KAMUI 2.5.2 — iOS 26 compatibility and write recovery
+
+## What's new in 2.5.2
+
+- Add the iOS 26 App Group operation flag used by the class-7 route.
+- Search the iOS 27 system data container root when locating PosterBoard.
+- Prefer an App Group with a resolvable container when the profile has several.
+- Show an actionable App Group requirement in Settings diagnostics.
+- Keep the last diagnostic result across app launches, keyed to the current iOS version, App Group and build.
+- Use unique temporary files and retry failed temporary writes in-place with rollback; log the underlying file error.
+- Fix Explore layout so the navigation title no longer overlaps wallpaper filters.
+- Localize app screens, dialogs, wallpaper setup instructions, and MobileGestalt write errors for all seven supported languages.
+- Bump the app version to `2.5.2` (build `252`).
+
+## Build
+
+- App version: `2.5.2`
+- Build: `252`
+- IPA: `build/KAMUI-2.5.2.ipa`
+
+---
+
+# KAMUI 2.5.1 — Explore and language fixes
+
+## What's new in 2.5.1
+
+- Keep wallpaper search and catalog filters fixed while browsing Explore.
+- Apply the selected app language immediately, independent of the system language.
+- Harden wallpaper imports, ignore macOS archive metadata, and add sanitized log sharing.
+- Show per-preset iOS requirements and device verification status.
+- Add the KAMUI layered-panels app icon.
+- Bump the app version to `2.5.1` (build `251`).
+
+## Build
+
+- App version: `2.5.1`
+- Build: `251`
+- IPA: `build/KAMUI-2.5.1.ipa`
+
+---
+
 # KAMUI 2.5.0 — full MCM container escape + Files browser
 
 ## What's new in 2.5.0

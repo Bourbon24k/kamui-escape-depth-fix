@@ -1,5 +1,6 @@
 #import "BQDepthFix.h"
 #import "BQCore.h"
+#import "BQUI.h"
 #import <dlfcn.h>
 #import <zlib.h>
 #import <CoreFoundation/CoreFoundation.h>
@@ -99,13 +100,25 @@ NSString *BQGroupID(void) {
                 CFTypeRef val = copy(task, CFSTR("com.apple.security.application-groups"), NULL);
                 if (val && CFGetTypeID(val) == CFArrayGetTypeID()) {
                     CFArrayRef arr = (CFArrayRef)val;
+                    NSString *firstGroup = nil;
                     for (CFIndex i = 0; i < CFArrayGetCount(arr); i++) {
                         CFTypeRef x = CFArrayGetValueAtIndex(arr, i);
                         if (x && CFGetTypeID(x) == CFStringGetTypeID()) {
-                            gGroupID = [(__bridge NSString *)x copy];
-                            break;
+                            NSString *candidate = (__bridge NSString *)x;
+                            if (!firstGroup) firstGroup = [candidate copy];
+                            NSURL *container = [[NSFileManager defaultManager]
+                                containerURLForSecurityApplicationGroupIdentifier:candidate];
+                            if (container.path.length) {
+                                gGroupID = [candidate copy];
+                                gGroupRoot = [container.path copy];
+                                break;
+                            }
                         }
                     }
+                    // Keep the entitlement value as a fallback; some signing
+                    // setups return a usable MCM group before Foundation can
+                    // resolve its container URL.
+                    if (!gGroupID) gGroupID = firstGroup;
                 }
                 if (val) CFRelease(val);
                 CFRelease(task);
@@ -392,7 +405,15 @@ static int64_t bq_escape_symlink(NSString *target, NSString **linkOut) {
         return -2;
     }
     NSString *path = nil;
-    int64_t h = bq_query_escape(7, gid, YES, 3, @"", 0x8100000000ULL, @"class7-symlink", &path);
+    // ContainerManager uses a different operation flag for App Group paths on
+    // iOS 26. Keep the iOS 27 flag for other targets and for newer releases.
+    NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
+    BOOL isIOS26AppGroup = os.majorVersion == 26 &&
+        [target containsString:@"/var/mobile/Containers/Shared/AppGroup"];
+    uint64_t flags = isIOS26AppGroup ? 0x800000000ULL : 0x8100000000ULL;
+    BQLog(@"class7 operation flags=0x%llx os=%@ appGroupTarget=%d",
+          (unsigned long long)flags, [UIDevice currentDevice].systemVersion, isIOS26AppGroup);
+    int64_t h = bq_query_escape(7, gid, YES, 3, @"", flags, @"class7-symlink", &path);
     if (h >= 0) {
         if (linkOut) *linkOut = caches;
         return h;
@@ -749,7 +770,7 @@ BOOL BQCheckAccess(NSString *target, BOOL writable, NSString **err) {
     NSString *link = nil;
     int64_t h = BQEscape(target, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape failed (%lld)", nil), (long long)h];
         return NO;
     }
     BOOL ok = NO;
@@ -811,7 +832,10 @@ static BOOL bq_zip_path_ok(NSString *name, NSString **cleanOut) {
     for (NSString *c in [clean componentsSeparatedByString:@"/"]) {
         if ([c isEqualToString:@".."] || [c isEqualToString:@"."]) return NO;
     }
-    if ([clean isEqualToString:@"__MACOSX"] || [clean hasPrefix:@"__MACOSX/"]) return NO;
+    for (NSString *component in [clean componentsSeparatedByString:@"/"]) {
+        if ([component isEqualToString:@"__MACOSX"] || [component isEqualToString:@".DS_Store"] ||
+            [component isEqualToString:@".AppleDouble"] || [component hasPrefix:@"._"]) return NO;
+    }
     if (cleanOut) *cleanOut = clean;
     return YES;
 }
@@ -1034,6 +1058,8 @@ NSString *BQFindPosterBoardContainer(NSString **err) {
 
     NSArray *roots = @[
         @"/var/mobile/Containers/Data/Application",
+        // Some iOS 27 builds keep system app containers under this root.
+        @"/var/containers/Data/System",
         @"/var/mobile/Containers/Data/InternalDaemon",
         @"/var/mobile/Containers/Data/PluginKitPlugin",
     ];
@@ -1078,35 +1104,106 @@ static BOOL bq_ensure_pb_descriptors(NSString *container, NSString *ext, NSStrin
     return ok;
 }
 
-static BOOL bq_overlay_directory(NSString *source, NSString *destination, NSError **error) {
+static BOOL bq_overlay_directory_recursive(NSString *source, NSString *destination, NSString *backupRoot,
+                                           NSMutableArray<NSDictionary *> *journal, NSUInteger *backupIndex,
+                                           BOOL *rollbackIncomplete, NSError **error) {
     NSFileManager *fm = [NSFileManager defaultManager];
-    BOOL isDirectory = NO;
-    if (![fm fileExistsAtPath:source isDirectory:&isDirectory] || !isDirectory) {
+    BOOL sourceIsDirectory = NO;
+    if (![fm fileExistsAtPath:source isDirectory:&sourceIsDirectory] || !sourceIsDirectory) {
         if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
         return NO;
     }
+
     BOOL destinationIsDirectory = NO;
-    if ([fm fileExistsAtPath:destination isDirectory:&destinationIsDirectory] && !destinationIsDirectory) {
-        if (![fm removeItemAtPath:destination error:error]) return NO;
+    BOOL destinationExists = [fm fileExistsAtPath:destination isDirectory:&destinationIsDirectory];
+    if (destinationExists && !destinationIsDirectory) {
+        NSString *backup = [backupRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%lu", (unsigned long)(*backupIndex)++]];
+        if (![fm moveItemAtPath:destination toPath:backup error:error]) return NO;
+        [journal addObject:@{@"kind": @"file", @"path": destination, @"backup": backup}];
+        destinationExists = NO;
     }
-    if (![fm createDirectoryAtPath:destination withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+    if (!destinationExists) {
+        if (![fm createDirectoryAtPath:destination withIntermediateDirectories:NO attributes:nil error:error]) return NO;
+        [journal addObject:@{@"kind": @"directory", @"path": destination}];
+    }
+
     NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:source error:error];
     if (!children) return NO;
     for (NSString *child in children) {
+        if ([child isEqualToString:@".DS_Store"] || [child hasPrefix:@"._"] ||
+            [child isEqualToString:@"__MACOSX"] || [child isEqualToString:@".AppleDouble"]) continue;
         NSString *src = [source stringByAppendingPathComponent:child];
         NSString *dst = [destination stringByAppendingPathComponent:child];
         BOOL childIsDirectory = NO;
         if (![fm fileExistsAtPath:src isDirectory:&childIsDirectory]) continue;
         if (childIsDirectory) {
-            if (!bq_overlay_directory(src, dst, error)) return NO;
-        } else {
-            BOOL dstIsDirectory = NO;
-            if ([fm fileExistsAtPath:dst isDirectory:&dstIsDirectory] &&
-                (dstIsDirectory || ![fm removeItemAtPath:dst error:error])) return NO;
-            if (![fm copyItemAtPath:src toPath:dst error:error]) return NO;
+            if (!bq_overlay_directory_recursive(src, dst, backupRoot, journal, backupIndex, rollbackIncomplete, error)) return NO;
+            continue;
         }
+
+        NSString *backup = nil;
+        if ([fm fileExistsAtPath:dst]) {
+            backup = [backupRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%lu", (unsigned long)(*backupIndex)++]];
+            if (![fm moveItemAtPath:dst toPath:backup error:error]) return NO;
+        }
+        NSString *staged = [dst stringByAppendingFormat:@".bq-stage-%@", NSUUID.UUID.UUIDString];
+        if (![fm copyItemAtPath:src toPath:staged error:error] || ![fm moveItemAtPath:staged toPath:dst error:error]) {
+            [fm removeItemAtPath:staged error:nil];
+            if (backup && ![fm moveItemAtPath:backup toPath:dst error:nil]) {
+                *rollbackIncomplete = YES;
+                BQLog(@"container overlay: immediate restore failed for %@", dst);
+            }
+            return NO;
+        }
+        NSMutableDictionary *entry = [@{@"kind": @"file", @"path": dst} mutableCopy];
+        if (backup) entry[@"backup"] = backup;
+        [journal addObject:entry];
     }
     return YES;
+}
+
+static BOOL bq_overlay_directory(NSString *source, NSString *destination, NSError **error) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL sourceIsDirectory = NO;
+    if (![fm fileExistsAtPath:source isDirectory:&sourceIsDirectory] || !sourceIsDirectory) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+        return NO;
+    }
+
+    NSString *backupRoot = [destination stringByAppendingPathComponent:
+                            [NSString stringWithFormat:@".bq-tendies-backup-%@", NSUUID.UUID.UUIDString]];
+    if (![fm createDirectoryAtPath:backupRoot withIntermediateDirectories:NO attributes:nil error:error]) return NO;
+    NSMutableArray<NSDictionary *> *journal = [NSMutableArray array];
+    NSUInteger backupIndex = 0;
+    BOOL rollbackIncomplete = NO;
+    BOOL ok = bq_overlay_directory_recursive(source, destination, backupRoot, journal, &backupIndex, &rollbackIncomplete, error);
+    if (!ok) {
+        for (NSDictionary *entry in journal.reverseObjectEnumerator) {
+            NSString *path = entry[@"path"];
+            if ([entry[@"kind"] isEqualToString:@"directory"]) {
+                NSError *removeError = nil;
+                if ([fm fileExistsAtPath:path] && ![fm removeItemAtPath:path error:&removeError]) {
+                    rollbackIncomplete = YES;
+                    BQLog(@"container overlay rollback: remove %@ failed: %@", path, removeError.localizedDescription ?: @"unknown error");
+                }
+            } else {
+                [fm removeItemAtPath:path error:nil];
+                NSString *backup = entry[@"backup"];
+                if (backup && ![fm moveItemAtPath:backup toPath:path error:nil]) {
+                    rollbackIncomplete = YES;
+                    BQLog(@"container overlay rollback: restore %@ failed", path);
+                }
+            }
+        }
+    }
+    if (ok || !rollbackIncomplete) {
+        [fm removeItemAtPath:backupRoot error:nil];
+    } else if (error) {
+        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteUnknownError
+                                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                                     @"Overlay failed; rollback was incomplete and recovery files were retained: %@", backupRoot]}];
+    }
+    return ok;
 }
 
 static BOOL bq_write_pb_refresh_prefs(NSString *container) {
@@ -1147,6 +1244,122 @@ static BOOL bq_write_pb_refresh_prefs(NSString *container) {
           writeError.localizedDescription ?: dirError.localizedDescription ?: serializeError.localizedDescription ?: @"-");
     BQEndEscape(h);
     return ok;
+}
+
+static NSString *bq_descriptor_target(NSString *container, NSString *ext) {
+    return [container stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"Library/Application Support/PRBPosterExtensionDataStore/%@/Extensions/%@/descriptors",
+             kPBExtVersion, ext]];
+}
+
+static NSDictionary *bq_install_descriptor(NSString *folder, NSString *container, NSString *ext,
+                                           NSString *destName, NSString **err) {
+    NSString *target = bq_descriptor_target(container, ext);
+    NSString *link = nil;
+    int64_t handle = BQEscape(target, &link);
+    if (handle < 0) {
+        if (err) *err = [NSString stringWithFormat:@"escape to %@ failed (%lld)", ext, (long long)handle];
+        return nil;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *destination = [link stringByAppendingPathComponent:destName];
+    NSString *staged = [link stringByAppendingPathComponent:[NSString stringWithFormat:@".bq-stage-%@", NSUUID.UUID.UUIDString]];
+    NSString *backupName = nil;
+    NSString *backup = nil;
+    NSError *copyError = nil;
+    BOOL ok = [fm copyItemAtPath:folder toPath:staged error:&copyError];
+    if (!ok) {
+        if (err) *err = [NSString stringWithFormat:@"staging descriptor failed: %@", copyError.localizedDescription ?: @"copy error"];
+    } else {
+        if ([fm fileExistsAtPath:destination]) {
+            backupName = [NSString stringWithFormat:@".bq-backup-%@", NSUUID.UUID.UUIDString];
+            backup = [link stringByAppendingPathComponent:backupName];
+            ok = [fm moveItemAtPath:destination toPath:backup error:&copyError];
+            if (!ok && err) *err = [NSString stringWithFormat:@"could not preserve existing descriptor: %@", copyError.localizedDescription ?: @"move error"];
+        }
+        if (ok) {
+            ok = [fm moveItemAtPath:staged toPath:destination error:&copyError];
+            if (ok && !bq_is_descriptor(destination)) {
+                ok = NO;
+                copyError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadCorruptFileError
+                                             userInfo:@{NSLocalizedDescriptionKey: @"installed folder is missing the PosterBoard descriptor identifier"}];
+                [fm removeItemAtPath:destination error:nil];
+            }
+            if (!ok) {
+                [fm removeItemAtPath:staged error:nil];
+                NSError *restoreError = nil;
+                BOOL restored = !backup || [fm moveItemAtPath:backup toPath:destination error:&restoreError];
+                if (!restored) BQLog(@"apply: failed to restore replaced descriptor %@: %@", destName, restoreError.localizedDescription ?: @"unknown error");
+                if (err) *err = restored
+                    ? [NSString stringWithFormat:@"installing descriptor failed: %@", copyError.localizedDescription ?: @"move error"]
+                    : [NSString stringWithFormat:@"installing descriptor failed and its previous copy could not be restored (backup %@): %@",
+                       backupName, restoreError.localizedDescription ?: @"unknown error"];
+            }
+        } else {
+            [fm removeItemAtPath:staged error:nil];
+        }
+    }
+    if (!ok) [fm removeItemAtPath:staged error:nil];
+    BQEndEscape(handle);
+    if (!ok) return nil;
+
+    NSMutableDictionary *record = [@{@"target": target, @"name": destName} mutableCopy];
+    if (backupName) record[@"backup"] = backupName;
+    return record;
+}
+
+static BOOL bq_rollback_descriptors(NSArray<NSDictionary *> *records) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL complete = YES;
+    for (NSDictionary *record in records.reverseObjectEnumerator) {
+        NSString *link = nil;
+        int64_t handle = BQEscape(record[@"target"], &link);
+        if (handle < 0) {
+            BQLog(@"apply rollback: escape failed for %@ (%lld)", record[@"target"], (long long)handle);
+            complete = NO;
+            continue;
+        }
+        NSString *destination = [link stringByAppendingPathComponent:record[@"name"]];
+        NSError *removeError = nil;
+        if ([fm fileExistsAtPath:destination] && ![fm removeItemAtPath:destination error:&removeError]) {
+            BQLog(@"apply rollback: remove %@ failed: %@", record[@"name"], removeError.localizedDescription ?: @"unknown error");
+            complete = NO;
+        }
+        NSString *backupName = record[@"backup"];
+        if (backupName) {
+            NSString *backup = [link stringByAppendingPathComponent:backupName];
+            NSError *restoreError = nil;
+            if (![fm fileExistsAtPath:backup]) {
+                BQLog(@"apply rollback: backup %@ is missing", backupName);
+                complete = NO;
+            } else if (![fm moveItemAtPath:backup toPath:destination error:&restoreError]) {
+                BQLog(@"apply rollback: restore %@ failed: %@", record[@"name"], restoreError.localizedDescription ?: @"unknown error");
+                complete = NO;
+            }
+        }
+        BQEndEscape(handle);
+    }
+    return complete;
+}
+
+static void bq_finalize_descriptor_backups(NSArray<NSDictionary *> *records) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSDictionary *record in records) {
+        NSString *backupName = record[@"backup"];
+        if (!backupName) continue;
+        NSString *link = nil;
+        int64_t handle = BQEscape(record[@"target"], &link);
+        if (handle < 0) {
+            BQLog(@"apply: unable to remove descriptor backup %@ (%lld)", backupName, (long long)handle);
+            continue;
+        }
+        NSError *removeError = nil;
+        if (![fm removeItemAtPath:[link stringByAppendingPathComponent:backupName] error:&removeError]) {
+            BQLog(@"apply: descriptor backup cleanup failed %@: %@", backupName, removeError.localizedDescription ?: @"unknown error");
+        }
+        BQEndEscape(handle);
+    }
 }
 
 BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
@@ -1245,7 +1458,8 @@ BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
         return NO;
     }
 
-    int written = 0;
+    NSMutableArray<NSDictionary *> *installed = [NSMutableArray array];
+    NSString *installFailure = nil;
     for (NSString *folder in folders) {
         // Determine provider from the path inside the archive.
         NSString *ext = kPBCollections;
@@ -1257,43 +1471,43 @@ BOOL BQApplyTendies(NSURL *url, int *count, NSString **err) {
         BOOL preserveIDs = [folder containsString:@"/container/"];
         if (!preserveIDs) bq_randomize_descriptor(folder);
         NSString *destName = preserveIDs ? folder.lastPathComponent : NSUUID.UUID.UUIDString;
-        NSArray<NSString *> *targets = @[ext];
-        BOOL wroteOne = NO;
-        for (NSString *targetExt in targets) {
-            NSString *ensureError = nil;
-            if (!bq_ensure_pb_descriptors(container, targetExt, &ensureError)) {
-                BQLog(@"apply: ensure %@ failed: %@", targetExt, ensureError ?: @"unknown error");
-                continue;
-            }
-            NSString *target = [container stringByAppendingPathComponent:
-                [NSString stringWithFormat:@"Library/Application Support/PRBPosterExtensionDataStore/%@/Extensions/%@/descriptors",
-                 kPBExtVersion, targetExt]];
-            NSString *link = nil;
-            int64_t h = BQEscape(target, &link);
-            if (h < 0) {
-                BQLog(@"apply: escape to %@ failed (%lld)", targetExt, (long long)h);
-                continue;
-            }
-            NSString *dest = [link stringByAppendingPathComponent:destName];
-            if (preserveIDs) [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
-            NSError *e = nil;
-            if ([[NSFileManager defaultManager] copyItemAtPath:folder toPath:dest error:&e]) {
-                wroteOne = YES;
-                BQLog(@"apply: %@ -> %@", folder.lastPathComponent, targetExt);
-            } else {
-                BQLog(@"apply: copy %@ -> %@ failed: %@", folder, targetExt, e);
-            }
-            BQEndEscape(h);
+        NSString *ensureError = nil;
+        if (!bq_ensure_pb_descriptors(container, ext, &ensureError)) {
+            installFailure = [NSString stringWithFormat:@"Could not prepare %@ descriptors: %@", ext, ensureError ?: @"unknown error"];
+            BQLog(@"apply: ensure %@ failed: %@", ext, ensureError ?: @"unknown error");
+            break;
         }
-        if (wroteOne) written++;
+        NSString *copyError = nil;
+        NSDictionary *record = bq_install_descriptor(folder, container, ext, destName, &copyError);
+        if (!record) {
+            installFailure = copyError ?: [NSString stringWithFormat:@"Could not install %@", folder.lastPathComponent];
+            BQLog(@"apply: install %@ failed: %@", folder.lastPathComponent, installFailure);
+            break;
+        }
+        [installed addObject:record];
+        BQLog(@"apply: %@ -> %@", folder.lastPathComponent, ext);
     }
-    if (written) bq_write_pb_refresh_prefs(container);
-    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-    if (count) *count = written;
-    if (written == 0) {
-        if (err) *err = @"no descriptors were written";
+
+    if (installFailure) {
+        BOOL rolledBack = bq_rollback_descriptors(installed);
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+        if (err) *err = rolledBack
+            ? [NSString stringWithFormat:@"Wallpaper import failed; rolled back %lu descriptor(s): %@", (unsigned long)installed.count, installFailure]
+            : [NSString stringWithFormat:@"Wallpaper import failed and rollback was incomplete; run Reset PosterBoard before retrying: %@", installFailure];
         return NO;
     }
+
+    if (![installed count] || !bq_write_pb_refresh_prefs(container)) {
+        BOOL rolledBack = bq_rollback_descriptors(installed);
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+        if (err) *err = !installed.count ? @"No descriptors were written" :
+            (rolledBack ? @"Could not refresh PosterBoard preferences; imported descriptors were rolled back" :
+             @"Could not refresh PosterBoard preferences and rollback was incomplete; run Reset PosterBoard before retrying");
+        return NO;
+    }
+    bq_finalize_descriptor_backups(installed);
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+    if (count) *count = (int)installed.count;
     return YES;
 }
 
@@ -1379,39 +1593,90 @@ static BOOL bq_write_all(int fd, const uint8_t *buf, size_t len) {
     return YES;
 }
 
+static BOOL bq_write_in_place(NSString *path, NSData *data, NSData *original, NSString **err) {
+    if (!original.length) {
+        if (err) *err = NSLocalizedString(@"in-place write refused because the original file is unavailable", nil);
+        return NO;
+    }
+    int fd = open(path.fileSystemRepresentation, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        int savedErrno = errno;
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"in-place open failed (%s)", nil), strerror(savedErrno)];
+        return NO;
+    }
+    BOOL ok = (ftruncate(fd, 0) == 0) &&
+              bq_write_all(fd, data.bytes, data.length) &&
+              (fsync(fd) == 0);
+    int writeErrno = errno ? errno : EIO;
+    if (!ok && original.length) {
+        BOOL restored = (ftruncate(fd, 0) == 0) &&
+                        (lseek(fd, 0, SEEK_SET) >= 0) &&
+                        bq_write_all(fd, original.bytes, original.length) &&
+                        (fsync(fd) == 0);
+        BQLog(@"in-place write failed; original rollback=%@", restored ? @"OK" : @"FAILED");
+    }
+    close(fd);
+    if (!ok && err) *err = [NSString stringWithFormat:NSLocalizedString(@"in-place write failed (%s)", nil), strerror(writeErrno)];
+    return ok;
+}
+
 static BOOL bq_write_data(NSString *path, NSData *data, NSString **err) {
     NSData *original = [NSData dataWithContentsOfFile:path];
     if (BQInPlaceWrite()) {
-        int fd = open(path.fileSystemRepresentation, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
-        if (fd >= 0) {
-            BOOL ok = (ftruncate(fd, 0) == 0) &&
-                      bq_write_all(fd, data.bytes, data.length) &&
-                      (fsync(fd) == 0);
-            if (!ok && original.length) {
-                BQLog(@"in-place write failed; rolling back original (%lu bytes)", (unsigned long)original.length);
-                ftruncate(fd, 0);
-                lseek(fd, 0, SEEK_SET);
-                bq_write_all(fd, original.bytes, original.length);
-                fsync(fd);
-            }
-            close(fd);
-            if (ok) return YES;
-            BQLog(@"in-place write failed, falling back to atomic");
-        } else {
-            BQLog(@"in-place open failed: %s", strerror(errno));
-        }
+        NSString *inPlaceError = nil;
+        if (bq_write_in_place(path, data, original, &inPlaceError)) return YES;
+        BQLog(@"%@; falling back to atomic replacement", inPlaceError ?: @"in-place write failed");
     }
-    NSString *tmp = [path stringByAppendingString:@".bqtmp"];
-    if (![data writeToFile:tmp atomically:NO]) {
-        if (err) *err = @"temp write failed";
+
+    // A unique sibling avoids collisions with interrupted or concurrent saves.
+    NSString *tmp = [path stringByAppendingFormat:@".bqtmp-%@", NSUUID.UUID.UUIDString];
+    int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        int savedErrno = errno;
+        NSString *atomicError = [NSString stringWithFormat:NSLocalizedString(@"temporary file create failed at %@ (%s)", nil),
+                                 path.lastPathComponent, strerror(savedErrno)];
+        BQLog(@"%@", atomicError);
+        NSString *inPlaceError = nil;
+        if (original.length && bq_write_in_place(path, data, original, &inPlaceError)) {
+            BQLog(@"atomic temp creation failed; recovered with in-place write");
+            return YES;
+        }
+        if (err) *err = inPlaceError.length
+            ? [NSString stringWithFormat:NSLocalizedString(@"%@; fallback: %@", nil), atomicError, inPlaceError]
+            : atomicError;
         return NO;
     }
-    int fd = open(tmp.fileSystemRepresentation, O_RDONLY);
-    if (fd >= 0) { fsync(fd); close(fd); }
+    BOOL tempWritten = bq_write_all(fd, data.bytes, data.length) && fsync(fd) == 0;
+    int writeErrno = errno ? errno : EIO;
+    close(fd);
+    if (!tempWritten) {
+        unlink(tmp.fileSystemRepresentation);
+        NSString *atomicError = [NSString stringWithFormat:NSLocalizedString(@"temporary file write failed (%s)", nil), strerror(writeErrno)];
+        BQLog(@"%@", atomicError);
+        NSString *inPlaceError = nil;
+        if (original.length && bq_write_in_place(path, data, original, &inPlaceError)) {
+            BQLog(@"atomic temp write failed; recovered with in-place write");
+            return YES;
+        }
+        if (err) *err = inPlaceError.length
+            ? [NSString stringWithFormat:NSLocalizedString(@"%@; fallback: %@", nil), atomicError, inPlaceError]
+            : atomicError;
+        return NO;
+    }
     int r = rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation);
     if (r != 0) {
-        if (err) *err = [NSString stringWithFormat:@"rename failed: %s", strerror(errno)];
+        int savedErrno = errno;
         unlink(tmp.fileSystemRepresentation);
+        NSString *atomicError = [NSString stringWithFormat:NSLocalizedString(@"rename failed (%s)", nil), strerror(savedErrno)];
+        BQLog(@"%@", atomicError);
+        NSString *inPlaceError = nil;
+        if (original.length && bq_write_in_place(path, data, original, &inPlaceError)) {
+            BQLog(@"atomic rename failed; recovered with in-place write");
+            return YES;
+        }
+        if (err) *err = inPlaceError.length
+            ? [NSString stringWithFormat:NSLocalizedString(@"%@; fallback: %@", nil), atomicError, inPlaceError]
+            : atomicError;
         return NO;
     }
     return YES;
@@ -1421,7 +1686,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape to MobileGestalt failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape to MobileGestalt failed (%lld)", nil), (long long)h];
         return nil;
     }
     NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
@@ -1433,7 +1698,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
     }
     BQEndEscape(h);
     if (!dict) {
-        if (err) *err = @"MobileGestalt plist missing or invalid";
+        if (err) *err = NSLocalizedString(@"MobileGestalt plist missing or invalid", nil);
         return nil;
     }
     BQLog(@"MG loaded: %lu CacheExtra key(s), %lu byte(s)",
@@ -1443,7 +1708,7 @@ NSMutableDictionary *BQLoadGestalt(NSString **err) {
 
 BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
     if (![dict isKindOfClass:[NSDictionary class]]) {
-        if (err) *err = @"invalid dictionary";
+        if (err) *err = NSLocalizedString(@"invalid dictionary", nil);
         return NO;
     }
     NSError *e = nil;
@@ -1451,13 +1716,13 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
                                                               format:NSPropertyListBinaryFormat_v1_0
                                                              options:0 error:&e];
     if (!data.length) {
-        if (err) *err = [NSString stringWithFormat:@"serialize failed: %@", e];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"serialize failed: %@", nil), e];
         return NO;
     }
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape to MobileGestalt failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape to MobileGestalt failed (%lld)", nil), (long long)h];
         return NO;
     }
     NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];
@@ -1466,7 +1731,7 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
         NSMutableDictionary *check = [NSMutableDictionary dictionaryWithContentsOfFile:plist];
         if (!check) {
             ok = NO;
-            if (err) *err = @"post-write verification failed";
+            if (err) *err = NSLocalizedString(@"post-write verification failed", nil);
         } else {
             BQLog(@"MG saved: %lu bytes, %lu CacheExtra keys",
                   (unsigned long)data.length, (unsigned long)[check[@"CacheExtra"] count]);
@@ -1479,13 +1744,13 @@ BOOL BQSaveGestalt(NSDictionary *dict, NSString **err) {
 BOOL BQRestoreGestalt(NSString **err) {
     NSData *backup = [NSData dataWithContentsOfFile:BQBackupPath()];
     if (!backup.length) {
-        if (err) *err = @"backup not found";
+        if (err) *err = NSLocalizedString(@"backup not found", nil);
         return NO;
     }
     NSString *link = nil;
     int64_t h = BQEscape(kMGCaches, &link);
     if (h < 0) {
-        if (err) *err = [NSString stringWithFormat:@"escape failed (%lld)", (long long)h];
+        if (err) *err = [NSString stringWithFormat:NSLocalizedString(@"escape failed (%lld)", nil), (long long)h];
         return NO;
     }
     NSString *plist = [link stringByAppendingPathComponent:@"com.apple.MobileGestalt.plist"];

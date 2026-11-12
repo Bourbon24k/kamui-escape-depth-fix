@@ -9,7 +9,6 @@ static NSString * const kCAPlaygroundCatalog = @"https://raw.githubusercontent.c
 static NSString * const kCAPlaygroundBase = @"https://raw.githubusercontent.com/CAPlayground/wallpapers/refs/heads/main/";
 static NSString * const kFavoritesKey = @"BQWallpaperFavorites";
 static NSString * const kWallpaperCell = @"WallpaperCardCell";
-static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
 
 @interface WallpaperCardCell : UICollectionViewCell
 @property (nonatomic, copy) void (^downloadAction)(void);
@@ -152,7 +151,8 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
 
 @end
 
-@interface WallpaperExploreHeader : UICollectionReusableView
+@interface WallpaperExploreHeader : UIView
+@property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, strong) UISegmentedControl *providerControl;
 @property (nonatomic, strong) UISegmentedControl *categoryControl;
 @property (nonatomic, copy) void (^onProviderSelection)(NSInteger index);
@@ -161,6 +161,12 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
 @implementation WallpaperExploreHeader
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
+        self.searchBar = [UISearchBar new];
+        self.searchBar.translatesAutoresizingMaskIntoConstraints = NO;
+        self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
+        self.searchBar.placeholder = NSLocalizedString(@"Search wallpapers", nil);
+        [self addSubview:self.searchBar];
+
         NSArray *providerNames = @[@"Cowabunga", @"CAPlayground", @"Both"];
         self.providerControl = [[UISegmentedControl alloc] initWithItems:providerNames];
         self.providerControl.translatesAutoresizingMaskIntoConstraints = NO;
@@ -173,7 +179,7 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
         [self.providerControl addTarget:self action:@selector(providerControlChanged) forControlEvents:UIControlEventValueChanged];
         [self addSubview:self.providerControl];
 
-        self.categoryControl = [[UISegmentedControl alloc] initWithItems:@[@"Custom", @"Apple"]];
+        self.categoryControl = [[UISegmentedControl alloc] initWithItems:@[NSLocalizedString(@"Custom", nil), NSLocalizedString(@"Apple", nil)]];
         self.categoryControl.translatesAutoresizingMaskIntoConstraints = NO;
         self.categoryControl.selectedSegmentIndex = 0;
         self.categoryControl.selectedSegmentTintColor = UIColor.secondarySystemBackgroundColor;
@@ -183,13 +189,17 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
         [self addSubview:self.categoryControl];
 
         [NSLayoutConstraint activateConstraints:@[
+            [self.searchBar.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:8],
+            [self.searchBar.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-8],
+            [self.searchBar.topAnchor constraintEqualToAnchor:self.topAnchor],
+            [self.searchBar.heightAnchor constraintEqualToConstant:56],
             [self.providerControl.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
             [self.providerControl.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-16],
-            [self.providerControl.topAnchor constraintEqualToAnchor:self.topAnchor constant:18],
+            [self.providerControl.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor constant:4],
             [self.providerControl.heightAnchor constraintEqualToConstant:44],
             [self.categoryControl.leadingAnchor constraintEqualToAnchor:self.providerControl.leadingAnchor],
             [self.categoryControl.trailingAnchor constraintEqualToAnchor:self.providerControl.trailingAnchor],
-            [self.categoryControl.topAnchor constraintEqualToAnchor:self.providerControl.bottomAnchor constant:17],
+            [self.categoryControl.topAnchor constraintEqualToAnchor:self.providerControl.bottomAnchor constant:12],
             [self.categoryControl.heightAnchor constraintEqualToConstant:44],
         ]];
     }
@@ -202,9 +212,9 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
 
 @interface TendiesExploreVC ()
 @property (nonatomic, strong) UICollectionView *collectionView;
+@property (nonatomic, strong) WallpaperExploreHeader *filtersHeader;
 @property (nonatomic, strong) NSArray<NSDictionary *> *items;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filtered;
-@property (nonatomic, strong) UISearchController *search;
 @property (nonatomic, assign) BOOL loading;
 @property (nonatomic, assign) BOOL favoritesOnly;
 @property (nonatomic, assign) NSInteger categoryIndex;
@@ -216,17 +226,11 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Explore";
+    self.title = NSLocalizedString(@"Explore Wallpapers", nil);
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
-
-    self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.search.searchResultsUpdater = self;
-    self.search.obscuresBackgroundDuringPresentation = NO;
-    self.search.searchBar.placeholder = @"Search wallpapers";
-    self.navigationItem.searchController = self.search;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.definesPresentationContext = YES;
+    // The catalog has its own filters immediately below the navigation bar.
+    // An expanded large-title bar overlaps those controls on compact layouts.
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
 
     UIButton *filterButton = [UIButton buttonWithType:UIButtonTypeSystem];
     filterButton.frame = CGRectMake(0, 0, 50, 50);
@@ -242,8 +246,7 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
     layout.minimumInteritemSpacing = 14;
     layout.minimumLineSpacing = 16;
     layout.sectionInset = UIEdgeInsetsMake(12, 16, 24, 16);
-    layout.sectionHeadersPinToVisibleBounds = YES;
-    layout.headerReferenceSize = CGSizeMake(self.view.bounds.size.width, 124);
+    layout.headerReferenceSize = CGSizeZero;
     self.collectionView = [[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];
     self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
     self.collectionView.backgroundColor = UIColor.systemBackgroundColor;
@@ -251,12 +254,22 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
     self.collectionView.dataSource = self;
     self.collectionView.delegate = self;
     [self.collectionView registerClass:WallpaperCardCell.class forCellWithReuseIdentifier:kWallpaperCell];
-    [self.collectionView registerClass:WallpaperExploreHeader.class forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:kWallpaperHeader];
+    self.filtersHeader = [[WallpaperExploreHeader alloc] initWithFrame:CGRectZero];
+    self.filtersHeader.translatesAutoresizingMaskIntoConstraints = NO;
+    self.filtersHeader.searchBar.delegate = self;
+    [self.filtersHeader.categoryControl addTarget:self action:@selector(categoryChanged:) forControlEvents:UIControlEventValueChanged];
+    __weak typeof(self) weakSelf = self;
+    self.filtersHeader.onProviderSelection = ^(NSInteger index) { [weakSelf providerChanged:index]; };
+    [self.view addSubview:self.filtersHeader];
     [self.view addSubview:self.collectionView];
     [NSLayoutConstraint activateConstraints:@[
+        [self.filtersHeader.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.filtersHeader.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.filtersHeader.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [self.filtersHeader.heightAnchor constraintEqualToConstant:173],
         [self.collectionView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.collectionView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.collectionView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.collectionView.topAnchor constraintEqualToAnchor:self.filtersHeader.bottomAnchor],
         [self.collectionView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
     ]];
 
@@ -274,8 +287,6 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
     CGFloat width = CGRectGetWidth(self.collectionView.bounds);
     CGFloat cardWidth = floor((width - 32 - 14) / 2.0);
     if (cardWidth > 0) {
-        CGSize wanted = CGSizeMake(width, 124);
-        if (!CGSizeEqualToSize(layout.headerReferenceSize, wanted)) layout.headerReferenceSize = wanted;
         CGFloat height = cardWidth * 1.60 + 84;
         if (fabs(layout.itemSize.width - cardWidth) > 0.5 || fabs(layout.itemSize.height - height) > 0.5) {
             layout.itemSize = CGSizeMake(cardWidth, height);
@@ -373,13 +384,13 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
         }];
         self.items = unique;
         [self applyFilters];
-        if (firstError && unique.count == 0) BQAlert(self, @"Catalog failed", firstError);
+        if (firstError && unique.count == 0) BQAlert(self, NSLocalizedString(@"Catalog failed", nil), firstError);
         BQLog(@"tendies catalog: %lu entries", (unsigned long)unique.count);
     });
 }
 
 - (void)applyFilters {
-    NSString *query = self.search.searchBar.text ?: @"";
+    NSString *query = self.filtersHeader.searchBar.text ?: @"";
     NSString *category = self.categoryIndex == 1 ? @"Apple" : @"Custom";
     NSSet *favorites = [NSSet setWithArray:[[NSUserDefaults standardUserDefaults] stringArrayForKey:kFavoritesKey] ?: @[]];
     NSMutableArray *matches = [NSMutableArray array];
@@ -399,17 +410,17 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
     [self.collectionView reloadData];
 }
 
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self applyFilters]; }
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText { [self applyFilters]; }
 
 - (void)showFilters {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Explore" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    NSString *favoriteTitle = self.favoritesOnly ? @"Show all wallpapers" : @"Show favorites";
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Explore Wallpapers", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *favoriteTitle = self.favoritesOnly ? NSLocalizedString(@"Show all wallpapers", nil) : NSLocalizedString(@"Show favorites", nil);
     [sheet addAction:[UIAlertAction actionWithTitle:favoriteTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         self.favoritesOnly = !self.favoritesOnly;
         [self applyFilters];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Refresh catalog" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self loadCatalog]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Refresh catalog", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self loadCatalog]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     UIPopoverPresentationController *popover = sheet.popoverPresentationController;
     if (popover) { popover.barButtonItem = self.navigationItem.rightBarButtonItem; }
     [self presentViewController:sheet animated:YES completion:nil];
@@ -431,7 +442,7 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
 - (void)download:(NSDictionary *)item {
     NSString *rel = item[@"url"];
     if (![rel isKindOfClass:NSString.class] || !rel.length) {
-        BQAlert(self, @"Download failed", @"The catalog entry has no valid wallpaper URL.");
+        BQAlert(self, NSLocalizedString(@"Download failed", nil), NSLocalizedString(@"The catalog entry has no valid wallpaper URL.", nil));
         return;
     }
     NSString *baseString = [item[@"bq_download_base"] isKindOfClass:NSString.class] ? item[@"bq_download_base"] : kCatalogBase;
@@ -439,18 +450,18 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
     NSURL *url = [NSURL URLWithString:rel relativeToURL:base].absoluteURL;
     NSString *scheme = url.scheme.lowercaseString;
     if (!url || (![scheme isEqualToString:@"https"] && ![scheme isEqualToString:@"http"])) {
-        BQAlert(self, @"Download failed", @"The catalog entry has an invalid wallpaper URL.");
+        BQAlert(self, NSLocalizedString(@"Download failed", nil), NSLocalizedString(@"The catalog entry has an invalid wallpaper URL.", nil));
         return;
     }
     NSString *name = item[@"name"] ?: url.lastPathComponent;
-    BQBusyView *busy = [BQBusyView showInView:self.view text:[NSString stringWithFormat:@"Downloading %@…", name]];
+    BQBusyView *busy = [BQBusyView showInView:self.view text:[NSString stringWithFormat:NSLocalizedString(@"Downloading %@...", nil), name]];
     [[NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [busy hide];
             NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 200;
-            if (error || status < 200 || status >= 300) { BQAlert(self, @"Download failed", error.localizedDescription ?: [NSString stringWithFormat:@"HTTP %ld", (long)status]); return; }
+            if (error || status < 200 || status >= 300) { BQAlert(self, NSLocalizedString(@"Download failed", nil), error.localizedDescription ?: [NSString stringWithFormat:NSLocalizedString(@"HTTP %ld", nil), (long)status]); return; }
             if (data.length < 4 || ((const uint8_t *)data.bytes)[0] != 'P' || ((const uint8_t *)data.bytes)[1] != 'K') {
-                BQAlert(self, @"Download failed", @"The server response is not a .tendies ZIP file.");
+                BQAlert(self, NSLocalizedString(@"Download failed", nil), NSLocalizedString(@"The server response is not a .tendies ZIP file.", nil));
                 return;
             }
             NSString *directory = [BQDocuments() stringByAppendingPathComponent:@"tendies"];
@@ -462,32 +473,32 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
             }
             NSError *writeError = nil;
             if (![data writeToURL:[NSURL fileURLWithPath:destination] options:NSDataWritingAtomic error:&writeError]) {
-                BQAlert(self, @"Save failed", writeError.localizedDescription ?: @"write error");
+                BQAlert(self, NSLocalizedString(@"Save failed", nil), writeError.localizedDescription ?: NSLocalizedString(@"write error", nil));
                 return;
             }
             BQLog(@"downloaded %@ (%lu bytes) -> %@", name, (unsigned long)data.length, leaf);
             if (self.onDownload) self.onDownload();
-            UIAlertController *prompt = [UIAlertController alertControllerWithTitle:@"Downloaded"
-                message:[NSString stringWithFormat:@"%@ saved to Documents/tendies.\nApply now?", name]
+            UIAlertController *prompt = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Downloaded", nil)
+                message:[NSString stringWithFormat:NSLocalizedString(@"%@ saved to Documents/tendies.\nApply now?", nil), name]
                 preferredStyle:UIAlertControllerStyleAlert];
-            [prompt addAction:[UIAlertAction actionWithTitle:@"Later" style:UIAlertActionStyleCancel handler:nil]];
-            [prompt addAction:[UIAlertAction actionWithTitle:@"Apply now" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                BQBusyView *work = [BQBusyView showInView:self.view text:@"Applying wallpaper…"];
+            [prompt addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Later", nil) style:UIAlertActionStyleCancel handler:nil]];
+            [prompt addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Apply now", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                BQBusyView *work = [BQBusyView showInView:self.view text:NSLocalizedString(@"Applying wallpaper...", nil)];
                 dispatch_async(BQWorkQueue(), ^{
                     NSString *applyError = nil;
                     int count = 0;
                     BOOL ok = BQApplyTendies([NSURL fileURLWithPath:destination], &count, &applyError);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [work hide];
-                        if (!ok) { BQAlert(self, @"Apply failed", applyError ?: @"unknown error"); return; }
-                        UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Applied"
-                            message:[NSString stringWithFormat:@"%d descriptor(s) written.\n\n1. Tap Open PosterBoard once so it discovers the new descriptors.\n2. Open the App Switcher and swipe PosterBoard away to close it.\n3. Return to KAMUI and tap Respring.\n4. After respring, touch and hold the Lock Screen, tap +, and choose the wallpaper. PosterBoard itself is not the wallpaper picker.", count]
+                        if (!ok) { BQAlert(self, NSLocalizedString(@"Apply failed", nil), applyError ?: NSLocalizedString(@"unknown error", nil)); return; }
+                        UIAlertController *done = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Applied", nil)
+                            message:[NSString stringWithFormat:NSLocalizedString(@"%d descriptor(s) written.\n\n1. Open PosterBoard once so it discovers the new wallpapers.\n2. Close PosterBoard from the App Switcher.\n3. Return to KAMUI and tap Respring.\n4. After respring, touch and hold the Lock Screen, tap +, and select the wallpaper.", nil), count]
                             preferredStyle:UIAlertControllerStyleAlert];
-                        [done addAction:[UIAlertAction actionWithTitle:@"Open PosterBoard" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
-                            if (!BQOpenPosterBoard()) BQAlert(self, @"Open failed", @"Could not open com.apple.PosterBoard.");
+                        [done addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Open PosterBoard", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                            if (!BQOpenPosterBoard()) BQAlert(self, NSLocalizedString(@"Open failed", nil), NSLocalizedString(@"Could not open com.apple.PosterBoard.", nil));
                         }]];
-                        [done addAction:[UIAlertAction actionWithTitle:@"Respring" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { BQRespring(); }]];
-                        [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                        [done addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Respring", nil) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { BQRespring(); }]];
+                        [done addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleCancel handler:nil]];
                         [self presentViewController:done animated:YES completion:nil];
                     });
                 });
@@ -511,23 +522,13 @@ static NSString * const kWallpaperHeader = @"WallpaperExploreHeader";
     return cell;
 }
 
-- (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
-    WallpaperExploreHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:kWallpaperHeader forIndexPath:indexPath];
-    [header.categoryControl removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-    header.providerControl.selectedSegmentIndex = self.providerIndex;
-    header.categoryControl.selectedSegmentIndex = self.categoryIndex;
-    [header.categoryControl setEnabled:(self.providerIndex != 1) forSegmentAtIndex:1];
-    [header.categoryControl addTarget:self action:@selector(categoryChanged:) forControlEvents:UIControlEventValueChanged];
-    __weak typeof(self) weakSelf = self;
-    header.onProviderSelection = ^(NSInteger index) { [weakSelf providerChanged:index]; };
-    return header;
-}
-
 - (void)providerChanged:(NSInteger)index {
     self.providerIndex = index;
     // CAPlayground only publishes custom wallpapers, so avoid leaving its catalog
     // filtered to an Apple category that cannot contain any results.
     if (index == 1) self.categoryIndex = 0;
+    self.filtersHeader.categoryControl.selectedSegmentIndex = self.categoryIndex;
+    [self.filtersHeader.categoryControl setEnabled:(index != 1) forSegmentAtIndex:1];
     self.favoritesOnly = NO;
     [self loadCatalog];
 }

@@ -48,7 +48,7 @@
 
 - (void)applyAll {
     if (self.files.count == 0) {
-        BQAlert(self, @"No wallpapers", @"Import a .tendies or .zip pack first.");
+        BQAlert(self, NSLocalizedString(@"No wallpapers", nil), NSLocalizedString(@"Import a .tendies or .zip pack first.", nil));
         return;
     }
     BQBusyView *busy = [BQBusyView showInView:self.view text:@"Applying wallpapers..."];
@@ -77,13 +77,13 @@
             UIAlertController *a = [UIAlertController alertControllerWithTitle:title
                                                                        message:msg
                                                                 preferredStyle:UIAlertControllerStyleAlert];
-            [a addAction:[UIAlertAction actionWithTitle:@"Open PosterBoard" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
-                if (!BQOpenPosterBoard()) BQAlert(self, @"Open failed", @"Could not open com.apple.PosterBoard.");
+            [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Open PosterBoard", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+                if (!BQOpenPosterBoard()) BQAlert(self, NSLocalizedString(@"Open failed", nil), NSLocalizedString(@"Could not open com.apple.PosterBoard.", nil));
             }]];
-            [a addAction:[UIAlertAction actionWithTitle:@"Respring" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+            [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Respring", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
                 BQRespring();
             }]];
-            [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
         });
     });
@@ -117,26 +117,26 @@
         if (access) [u stopAccessingSecurityScopedResource];
     }
     [self reloadFiles];
-    if (errors.count) BQAlert(self, @"Import errors", [errors componentsJoinedByString:@"\n"]);
+    if (errors.count) BQAlert(self, NSLocalizedString(@"Import errors", nil), [errors componentsJoinedByString:@"\n"]);
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
 }
 
 - (void)resetPosterBoard {
-    BQConfirm(self, @"Reset PosterBoard?", @"Remove all descriptors from the supported providers, including stock collections. PosterBoard usually regenerates stock collections. Continue?", ^{
+    BQConfirm(self, NSLocalizedString(@"Reset PosterBoard?", nil), NSLocalizedString(@"Remove all descriptors from the three provider folders, including stock collections. PosterBoard usually regenerates stock collections. Continue?", nil), ^{
         BQBusyView *busy = [BQBusyView showInView:self.view text:@"Resetting PosterBoard..."];
         dispatch_async(BQWorkQueue(), ^{
             NSString *err = nil;
             BOOL ok = BQResetPosterBoard(&err);
             dispatch_async(dispatch_get_main_queue(), ^{
                 [busy hide];
-                if (!ok) { BQAlert(self, @"Reset failed", err ?: @"unknown error"); return; }
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"PosterBoard reset"
-                                                                           message:@"Descriptors removed. Respring to apply."
+                if (!ok) { BQAlert(self, NSLocalizedString(@"Reset failed", nil), err ?: NSLocalizedString(@"unknown error", nil)); return; }
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"PosterBoard reset", nil)
+                                                                           message:NSLocalizedString(@"Descriptors removed. Respring to apply.", nil)
                                                                     preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-                [a addAction:[UIAlertAction actionWithTitle:@"Respring" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { BQRespring(); }]];
+                [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleCancel handler:nil]];
+                [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Respring", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { BQRespring(); }]];
                 [self presentViewController:a animated:YES completion:nil];
             });
         });
@@ -144,7 +144,7 @@
 }
 
 - (void)openPosterBoard {
-    if (!BQOpenPosterBoard()) BQAlert(self, @"Open failed", @"Could not open com.apple.PosterBoard.");
+    if (!BQOpenPosterBoard()) BQAlert(self, NSLocalizedString(@"Open failed", nil), NSLocalizedString(@"Could not open com.apple.PosterBoard.", nil));
 }
 
 - (void)explore {
@@ -161,7 +161,7 @@
 }
 
 - (void)respring {
-    BQConfirm(self, @"Respring?", @"Restart SpringBoard to apply wallpaper changes.", ^{ BQRespring(); });
+    BQConfirm(self, NSLocalizedString(@"Respring?", nil), NSLocalizedString(@"Restart SpringBoard to apply wallpaper changes.", nil), ^{ BQRespring(); });
 }
 
 #pragma mark - Table
@@ -175,14 +175,14 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section == 0) return @"Actions";
+    if (section == 0) return NSLocalizedString(@"Actions", nil);
     if (section == 1) return NSLocalizedString(@"Depth Effect", nil);
-    return self.files.count ? @"Imported packs" : nil;
+    return self.files.count ? NSLocalizedString(@"Imported packs", nil) : nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
-        return @"Import up to 5 packs. More than 15 is a bad idea. Applying writes descriptor folders into PosterBoard; use Reset to remove them.";
+        return NSLocalizedString(@"Import up to 5 packs. More than 15 is a bad idea. Applying writes descriptor folders into PosterBoard; use Reset to remove them.", nil);
     }
     if (section == 1) return NSLocalizedString(@"Experimental. Fixes compatible wallpapers when applied; original files are not changed.", nil);
     return nil;
@@ -192,7 +192,7 @@
     if (indexPath.section == 0) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"action"];
         if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"action"];
-        NSArray *titles = @[@"Apply All", @"Import .tendies", @"Explore Wallpapers", @"Reset PosterBoard", @"Open PosterBoard", @"Respring"];
+        NSArray *titles = @[NSLocalizedString(@"Apply All", nil), NSLocalizedString(@"Import .tendies", nil), NSLocalizedString(@"Explore Wallpapers", nil), NSLocalizedString(@"Reset PosterBoard", nil), NSLocalizedString(@"Open PosterBoard", nil), NSLocalizedString(@"Respring", nil)];
         cell.textLabel.text = titles[indexPath.row];
         cell.textLabel.textColor = indexPath.row == 3 ? [UIColor systemRedColor] : self.view.tintColor;
         cell.textLabel.textAlignment = NSTextAlignmentLeft;
@@ -238,7 +238,7 @@
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section != 2) return nil;
     UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
-                                                                     title:@"Delete"
+                                                                     title:NSLocalizedString(@"Delete", nil)
                                                                    handler:^(UIContextualAction *action, UIView *v, void (^done)(BOOL)) {
         NSString *path = self.files[indexPath.row];
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
